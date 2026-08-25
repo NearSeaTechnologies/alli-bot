@@ -95,9 +95,12 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(rendererPatch, /W\.openPicker\(\)/);
   assert.match(rendererPatch, /retry kickstart until the bot can introduce itself/);
   assert.doesNotMatch(rendererPatch, /Hey — introduce yourself/);
-  assert.match(rendererPatch, /keep bot image idle while working/);
-  assert.match(rendererPatch, /do not overlay thinking dots on the bot image/);
-  assert.match(rendererPatch, /show green indicator only while a bot is actually working/);
+  // Agent liveness: the shipped renderer must keep the original's avatar animations,
+  // typing dots and green working pip. These used to be patched out.
+  assert.doesNotMatch(rendererPatch, /patchWorkingAvatarDots/);
+  assert.doesNotMatch(rendererPatch, /keep bot image idle while working/);
+  assert.doesNotMatch(rendererPatch, /do not overlay thinking dots on the bot image/);
+  assert.doesNotMatch(rendererPatch, /show green indicator only while a bot is actually working/);
   assert.match(rendererPatch, /hide About menu item/);
   assert.match(rendererPatch, /rename sidebar Grok/);
   const onboarding = await readFile(path.join(repoRoot, "source/shared/agents/onboarding.ts"), "utf8");
@@ -136,6 +139,15 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(patchedPicker, /"All","Productivity","Sales","Marketing","Ops","Success","Personal"/);
   assert.match(patchedPicker, /multi-account-content-desk/);
   assert.match(patchedPicker, /W\.openPicker\(\)/);
+  // Patching must not flatten the persona animation map, delete the typing dots,
+  // or narrow the green working indicator - that is what made the app look dead.
+  assert.match(patchedPicker, /const tln=\{thinking:"thinking",searching:"searching"/);
+  assert.match(patchedPicker, /children:p\.jsx\(ANe,\{size:"sm"\}\)\}\):null/);
+  assert.match(patchedPicker, /A_t=\{thinking:"dots",orbit:"orbit"/);
+  assert.match(patchedPicker, /function xge\(n\)\{return n\.awaitingUserResponse==null&&n\.isRunning\|\|KCe\(n\)\}/);
+  assert.match(patchedPicker, /p\.jsx\(ANe,\{size:kJn\}\)/);
+  // the kickstart retry fix must survive alongside the restored animations
+  assert.match(patchedPicker, /for\(let k=0;k<20;k\+\+\)/);
   const leftoverOpenPicker = officialRenderer.replaceAll("ee.current||(s(),o(),N(),W.open())", "ee.current||(s(),o(),N(),W.openPicker())");
   const recoveredPicker = patchOriginalComposerFileStage(patchOriginalComposerFilePicker(leftoverOpenPicker));
   assert.match(recoveredPicker, /Search templates/);

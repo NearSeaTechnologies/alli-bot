@@ -151,52 +151,10 @@ const WEEKLY_USAGE_ITEM_BEFORE = 'k=p.jsx(It.SubMenuTrigger,{label:"Weekly usage
 const WEEKLY_USAGE_ITEM_AFTER = 'k=null';
 const SIDEBAR_AGENT_NAME_BEFORE = 'className:re("sand-agent-item__name",Fe(h1.name,Ut.body1,Us.medium).className),children:i}';
 const SIDEBAR_AGENT_NAME_AFTER = 'className:re("sand-agent-item__name",Fe(h1.name,Ut.body1,Us.medium).className),children:i==="Grok"?"Alli":i}';
-const WORKING_PERSONA_BEFORE = 'const tln={thinking:"thinking",searching:"searching",browsing:"searching",reading:"searching",connecting:"searching",writing:"working",coding:"working",generating:"loading","running-commands":"working","on-its-computer":"working","on-your-computer":"working",working:"working",messaging:"orbit",waiting:"orbit"},eZ="idle";function nln(n){return n==null?"working":n.kind==="tool"&&n.tool==="SendToAgent"?"sending":tln[dse(n).verb]}';
-const WORKING_PERSONA_AFTER = 'const tln={thinking:"idle",searching:"idle",browsing:"idle",reading:"idle",connecting:"idle",writing:"idle",coding:"idle",generating:"idle","running-commands":"idle","on-its-computer":"idle","on-your-computer":"idle",working:"idle",messaging:"idle",waiting:"idle"},eZ="idle";function nln(n){return n==null?"idle":n.kind==="tool"&&n.tool==="SendToAgent"?"idle":tln[dse(n).verb]??"idle"}';
-const WORKING_PHOTO_BEFORE = 'if(z){let ye;e[18]===Symbol.for("react.memo_cache_sentinel")?(ye=p.jsx(ANe,{size:kJn}),e[18]=ye):ye=e[18],Ae=ye}else Se&&G!=null?Ae=p.jsx(Nlt,{color:V.color,eyeColor:sSe,sizePx:DGe,sourceId:G,state:H}):Ae=p.jsx(sd,{color:V.color,emphasis:ce,eyeColor:sSe,ref:fe,shape:V.shape,sizePx:DGe,state:ae});';
-const WORKING_PHOTO_AFTER = 'if(z)Ae=p.jsx(Iee,{avatarKey:L,dataUrl:F.avatarDataUrl??null,fillPx:DGe,isStatic:!0});else Se&&G!=null?Ae=p.jsx(Nlt,{color:V.color,eyeColor:sSe,sizePx:DGe,sourceId:G,state:H}):Ae=p.jsx(sd,{color:V.color,emphasis:ce,eyeColor:sSe,ref:fe,shape:V.shape,sizePx:DGe,state:ae});';
-const ACTIVITY_DOTS_BEFORE = 'j=v?p.jsx("span",{className:q.className,style:q.style,children:p.jsx(ANe,{size:"sm"})}):null';
-const ACTIVITY_DOTS_AFTER = 'j=null';
-const KIT_WORKING_BADGE_BEFORE = 'else if(s==="working"){let G;e[45]===Symbol.for("react.memo_cache_sentinel")?(G=p.jsx(ANe,{size:"sm",style:w1e.badgeFill}),e[45]=G):G=e[45],k=G}';
-const KIT_WORKING_BADGE_AFTER = 'else if(s==="working"){let G;e[45]===Symbol.for("react.memo_cache_sentinel")?(G=p.jsx(d0e,{status:"working",style:w1e.badgeFill}),e[45]=G):G=e[45],k=G}';
-const ACTIVITY_MARK_STATE_BEFORE = 'const vJn="working"';
-const ACTIVITY_MARK_STATE_AFTER = 'const vJn="idle"';
 
 export function patchKickstartRetry(source) {
   if (!source.includes(KICKSTART_RETRY_BEFORE)) return source;
   return replaceExactlyOnce(source, KICKSTART_RETRY_BEFORE, KICKSTART_RETRY_AFTER, "retry kickstart until the bot can introduce itself");
-}
-
-export function patchWorkingAvatarDots(source) {
-  let patched = source;
-  if (!patched.includes('working:"idle",messaging:"orbit"') && patched.includes(WORKING_PERSONA_BEFORE)) {
-    patched = replaceExactlyOnce(patched, WORKING_PERSONA_BEFORE, WORKING_PERSONA_AFTER, "keep bot image idle while working");
-    if (patched.includes(WORKING_PHOTO_BEFORE)) patched = replaceExactlyOnce(patched, WORKING_PHOTO_BEFORE, WORKING_PHOTO_AFTER, "keep custom bot photo instead of working dots");
-    if (patched.includes(ACTIVITY_DOTS_BEFORE)) patched = replaceExactlyOnce(patched, ACTIVITY_DOTS_BEFORE, ACTIVITY_DOTS_AFTER, "do not overlay working dots on activity avatars");
-    if (patched.includes(KIT_WORKING_BADGE_BEFORE)) patched = replaceExactlyOnce(patched, KIT_WORKING_BADGE_BEFORE, KIT_WORKING_BADGE_AFTER, "use green status instead of working dots on kit avatars");
-    if (patched.includes(ACTIVITY_MARK_STATE_BEFORE)) patched = replaceExactlyOnce(patched, ACTIVITY_MARK_STATE_BEFORE, ACTIVITY_MARK_STATE_AFTER, "activity mark stays idle while working");
-  }
-  if (patched.includes('thinking:"thinking",searching:"searching"')) {
-    patched = replaceExactlyOnce(patched, 'thinking:"thinking",searching:"searching"', 'thinking:"idle",searching:"idle"', "thinking and searching keep the bot image idle");
-  }
-  if (patched.includes('A_t={thinking:"dots",orbit:"orbit"')) {
-    patched = replaceExactlyOnce(patched, 'A_t={thinking:"dots",orbit:"orbit"', 'A_t={orbit:"orbit"', "do not overlay thinking dots on the bot image");
-  }
-  if (patched.includes('KCe(n)?"thinking":nln(n.currentActivity??null)')) {
-    patched = replaceExactlyOnce(patched, 'function wbe(n){return n==null||!xge(n)?eZ:KCe(n)?"thinking":nln(n.currentActivity??null)}', 'function wbe(n){return n==null||!xge(n)?eZ:nln(n.currentActivity??null)}', "writing does not switch the bot image to thinking dots");
-  }
-  if (patched.includes('_t==="dots"?za(gn,ze):_t==="orbit"?$a(gn,ze)')) {
-    patched = replaceExactlyOnce(patched, '_t==="dots"?za(gn,ze):_t==="orbit"?$a(gn,ze)', '_t==="dots"?0:_t==="orbit"?$a(gn,ze)', "disable persona dots overlay");
-  }
-  if (patched.includes("n.awaitingUserResponse==null&&n.isRunning||KCe(n)")) {
-    patched = replaceExactlyOnce(
-      patched,
-      "function xge(n){return n.awaitingUserResponse==null&&n.isRunning||KCe(n)}",
-      "function xge(n){return n.awaitingUserResponse==null&&(n.currentActivity!=null||n.isComposingMessage)}",
-      "show green indicator only while a bot is actually working",
-    );
-  }
-  return patched;
 }
 
 export function patchOriginalComposerFilePicker(source) {
@@ -205,8 +163,7 @@ export function patchOriginalComposerFilePicker(source) {
   patched = replaceOnceOrSkip(patched, FEEDBACK_ITEM_BEFORE, FEEDBACK_ITEM_AFTER, "hide Send Feedback menu item");
   patched = replaceOnceOrSkip(patched, WEEKLY_USAGE_ITEM_BEFORE, WEEKLY_USAGE_ITEM_AFTER, "hide Weekly usage menu item");
   patched = replaceOnceOrSkip(patched, SIDEBAR_AGENT_NAME_BEFORE, SIDEBAR_AGENT_NAME_AFTER, "rename sidebar Grok");
-  patched = patchKickstartRetry(patched);
-  return patchWorkingAvatarDots(patched);
+  return patchKickstartRetry(patched);
 }
 
 export function patchOriginalComposerFileStage(source) {
