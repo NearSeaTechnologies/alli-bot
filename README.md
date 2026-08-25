@@ -109,9 +109,11 @@ the `localhost:1340` tunnel, so every new agent is created there. There is no
 local Docker or remote-box fallback; if the tunnel is down the switch stays on
 and the card reports that it is waiting for the sandbox.
 
-A leftover local `grok-bot-local-vm` container from older builds is stopped on
-connect. The card's reset and update actions run over SSH against the sandbox
-host.
+The desktop never starts, inspects, or stops a local container; Docker is not
+required on the Mac. The card's reset and update actions run over SSH against
+the sandbox host. If an older build left a `grok-bot-local-vm` container on
+the Mac holding port 1340, remove it once with `docker rm -f grok-bot-local-vm`
+so the tunnel can bind.
 
 ## Requirements
 
