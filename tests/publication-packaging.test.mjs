@@ -162,7 +162,11 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(coordinator, /onTextDelta,\s*agentId/);
   assert.match(localDocker, /public\.ecr\.aws\/k0i0n2g5\/cursorenvironments\/universal:sand-box-latest/);
   assert.match(localDocker, /LOCAL_DOCKER_GATEWAY_URL = "http:\/\/127\.0\.0\.1:1340"/);
-  assert.match(localDocker, /connect: async \(\) => \{\s*await stopLocalDockerBox\(\);\s*return await connectSandboxBox\(settings\.settingsPath\);/);
+  assert.match(localDocker, /connect: async \(\) => \{\s*const leftover = await stopLocalDockerBox\(\);\s*if \(leftover\.reason != null\) console\.warn\(`\[sand\] \$\{leftover\.reason\}`\);\s*return await connectSandboxBox\(settings\.settingsPath\);/);
+  const stopLocalDockerBoxSource = /export async function stopLocalDockerBox\(\)[\s\S]*?\n\}\n/.exec(localDocker)?.[0];
+  assert.ok(stopLocalDockerBoxSource, "stopLocalDockerBox must exist");
+  assert.doesNotMatch(stopLocalDockerBoxSource, /throw /, "Docker state must never block a sandbox connection");
+  assert.match(stopLocalDockerBoxSource, /if \(!inspected\.owned\) return \{ stopped: false, reason:/);
   assert.match(localDocker, /recreate: async \(\): Promise<RecreateResult> => await updateSandboxBox\(settings\.settingsPath\)/);
   assert.match(localDocker, /forceRecreate: async \(\): Promise<RecreateResult> => await resetSandboxBox\(settings\.settingsPath\)/);
   assert.doesNotMatch(localDocker, /local-docker"|ensureLocalDockerBox|startLocalDockerBox|getLocalDockerStatus|stageCurrentHostBundle|localAuthMountArguments|getBoxRuntime\(\)|remote\.connect\(\)/);

@@ -170,13 +170,20 @@ export async function getSandboxStatus(settingsPath: string): Promise<LocalDocke
 /**
  * Stops a leftover local VM container from builds that still offered the
  * local Docker runtime, so it cannot shadow the sandbox tunnel on :1340.
+ *
+ * Best effort only: Docker state must never block a sandbox connection, so
+ * an unowned container is left alone and failures are logged, not thrown.
  */
-export async function stopLocalDockerBox(): Promise<void> {
-  const inspected = await inspectContainer();
-  if (!inspected.exists || !inspected.running) return;
-  if (!inspected.owned) throw new Error(`Refusing to stop unowned container ${LOCAL_DOCKER_BOX_CONTAINER}.`);
-  const stopped = await runDocker(["stop", LOCAL_DOCKER_BOX_CONTAINER]);
-  if (!stopped.ok) throw new Error(`Could not stop the local Docker VM: ${stopped.output}`);
+export async function stopLocalDockerBox(): Promise<{ readonly stopped: boolean; readonly reason?: string }> {
+  try {
+    const inspected = await inspectContainer();
+    if (!inspected.exists || !inspected.running) return { stopped: false };
+    if (!inspected.owned) return { stopped: false, reason: `Leaving unowned container ${LOCAL_DOCKER_BOX_CONTAINER} running.` };
+    const stopped = await runDocker(["stop", LOCAL_DOCKER_BOX_CONTAINER]);
+    return stopped.ok ? { stopped: true } : { stopped: false, reason: `Could not stop the local Docker VM: ${stopped.output}` };
+  } catch (error) {
+    return { stopped: false, reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /**
@@ -190,7 +197,8 @@ export function createSettingsRoutedHostConnector(
 ): SandRemoteHostConnector {
   return {
     connect: async () => {
-      await stopLocalDockerBox();
+      const leftover = await stopLocalDockerBox();
+      if (leftover.reason != null) console.warn(`[sand] ${leftover.reason}`);
       return await connectSandboxBox(settings.settingsPath);
     },
     ...(remote.issueLocalExecDaemonCredential == null ? {} : { issueLocalExecDaemonCredential: remote.issueLocalExecDaemonCredential.bind(remote) }),
