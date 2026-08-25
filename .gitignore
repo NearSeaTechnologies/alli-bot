@@ -26,6 +26,7 @@ node_modules/
 /host-main.cjs
 /main.cjs
 /index-*.js
+/index-*.css
 /katex-*.js
 /mermaid.core-*.js
 /xlsx-*.js
