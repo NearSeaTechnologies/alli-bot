@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { extractFile, listPackage } from "@electron/asar";
 import { build as esbuild } from "esbuild";
 
-import { runtimeComposition } from "./lib/clean-build.mjs";
+import { NODE_ESBUILD_LOADERS, runtimeComposition } from "./lib/clean-build.mjs";
 import { repoRoot, sourceAppDir } from "./lib/config.mjs";
 import { requiredElectronMainProductionBindings } from "./electron-main-production-activation.mjs";
 import { assembleHostProductionBindingManifest } from "./host-production-activation.mjs";
@@ -268,14 +268,14 @@ function interfaceMembers(sourceText, fileName, interfaceName) {
   });
 }
 
-async function sourceGraph(entrypoint, { platform = "node", format = "cjs", loader = undefined } = {}) {
+export async function sourceGraph(entrypoint, { platform = "node", format = "cjs", loader = NODE_ESBUILD_LOADERS } = {}) {
   const result = await esbuild({
     absWorkingDir: repoRoot,
     bundle: true,
     entryPoints: [path.join(repoRoot, entrypoint)],
     external: ["electron"],
     format,
-    ...(loader == null ? {} : { loader }),
+    loader,
     logLevel: "silent",
     metafile: true,
     platform,

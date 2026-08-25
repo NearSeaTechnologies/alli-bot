@@ -24,6 +24,9 @@ import { run } from "./process.mjs";
 
 export { packStagedAppWithIntegrity, verifyStagedPackageIntegrity } from "./asar-integrity.mjs";
 
+/** Node/preload esbuild loader. Shared with runtime-composition sourceGraph so CSS imports cannot drift. */
+export const NODE_ESBUILD_LOADERS = Object.freeze({ ".css": "text" });
+
 export const cleanBuildDir = path.join(buildDir, "clean-runtime");
 export const fidelityCleanBuildDir = path.join(buildDir, "fidelity-clean-runtime");
 export const rendererArtifactProvenance = "dist/renderer-artifact-provenance.json";
@@ -97,7 +100,7 @@ function nodeBuildOptions(outfile) {
     platform: "node",
     sourcemap: false,
     target: "node22",
-    loader: { ".css": "text" },
+    loader: NODE_ESBUILD_LOADERS,
   };
 }
 
