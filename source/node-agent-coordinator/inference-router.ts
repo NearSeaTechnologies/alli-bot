@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { runRoutedProviderText } from "../host/extensions/inference/provider-session.js";
 import type { SandInferenceProvider } from "../shared/inference-router.js";
 import { SandSettingsStore } from "../shared/node/settings/sand-settings-store.js";
+import { createPacedTextReveal } from "./paced-text-reveal.js";
 import { createRoutedMcpBridge } from "./routed-mcp-bridge.js";
 
 type StoredEntry = {
@@ -21,8 +22,102 @@ type Store = { readonly schemaVersion: 2; readonly agents: Readonly<Record<strin
 
 const EMPTY_STORE: Store = { schemaVersion: 2, agents: {} };
 
+export const LOCAL_INFERENCE_AGENT_ID = "alli-local";
+
+export function createLocalInferenceAgent(nowMs = Date.now()): Record<string, unknown> {
+  return {
+    id: LOCAL_INFERENCE_AGENT_ID,
+    name: "Alli",
+    description: "",
+    title: "",
+    avatarDataUrl: null,
+    avatarVersion: null,
+    avatarShape: null,
+    avatarColor: null,
+    createdAt: nowMs,
+    updatedAt: nowMs,
+    path: "",
+    isActive: true,
+    isRunning: false,
+    isComposingMessage: false,
+    lastEntry: null,
+    lastMessageId: null,
+    lastMessagePreview: null,
+    newestEntryId: null,
+    hasUnread: false,
+    unreadCount: 0,
+    lastViewedAt: 0,
+    lastActivityAt: 0,
+    awaitingUserResponse: null,
+    notificationsEnabled: false,
+    notifyOnUpdatesEnabled: true,
+    isHiddenFromSidebar: false,
+    origin: "user",
+    isGroup: false,
+    memberIds: [],
+    conversationPartnerIds: [],
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value != null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+export function routedPluginToolRows(value: unknown): Record<string, any>[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(raw => {
+    const row = asRecord(raw);
+    if (row == null || typeof row.name !== "string" || row.name.length === 0) return [];
+    return [row];
+  });
+}
+
+export function resolveRoutedPluginTool(toolName: string, tools: readonly Record<string, any>[], definition?: Record<string, unknown> | null): Record<string, any> | null {
+  if (definition != null && typeof definition.providerIdentifier === "string" && typeof definition.toolName === "string") return definition;
+  const stripped = toolName.replace(/^mcp__grok_bot_plugins__/, "");
+  return tools.find(tool => tool.name === toolName || tool.name === stripped || tool.toolName === stripped || `mcp__grok_bot_plugins__${tool.name}` === toolName) ?? (definition ?? null);
+}
+
+export function pluginPermissionIdentity(toolName: string, definition?: Record<string, unknown> | null): { readonly key: string; readonly target: string } {
+  const provider = typeof definition?.providerIdentifier === "string" ? definition.providerIdentifier.trim() : "";
+  const native = typeof definition?.toolName === "string" ? definition.toolName.trim() : "";
+  const stripped = toolName.replace(/^mcp__grok_bot_plugins__/, "").replace(/__/g, " / ");
+  const plugin = provider.length > 0 ? provider : (stripped.split(" / ")[0] ?? stripped);
+  const action = native.length > 0 ? native : stripped;
+  return {
+    key: `plugin:${plugin}`,
+    target: provider.length > 0 && native.length > 0 && provider !== native ? `${provider} / ${native}` : action,
+  };
+}
+
+export function mergeLocalInferenceAgents(remote: readonly unknown[], nowMs = Date.now()): Record<string, unknown>[] {
+  const alli = createLocalInferenceAgent(nowMs);
+  const rest: Record<string, unknown>[] = [];
+  const seen = new Set<string>([LOCAL_INFERENCE_AGENT_ID]);
+  for (const raw of remote) {
+    const row = asRecord(raw);
+    if (row == null || typeof row.id !== "string" || seen.has(row.id)) continue;
+    seen.add(row.id);
+    rest.push(row);
+  }
+  return rest.length === 0 ? [alli] : [...rest, alli];
+}
+
+export function mergeLocalInferenceRosterEvent(payload: unknown, nowMs = Date.now()): Record<string, unknown> {
+  const record = asRecord(payload) ?? {};
+  const agents = Array.isArray(record.agents) ? record.agents : Array.isArray(payload) ? payload : [];
+  const merged = mergeLocalInferenceAgents(agents, nowMs);
+  if (Array.isArray(payload) && asRecord(payload) == null) return { agents: merged };
+  const agent = asRecord(record.agent);
+  return {
+    ...record,
+    agents: merged,
+    ...(agent?.id === LOCAL_INFERENCE_AGENT_ID ? { agent: alliOverlay(agent, nowMs) } : {}),
+  };
+}
+
+function alliOverlay(agent: Record<string, unknown>, nowMs: number): Record<string, unknown> {
+  return { ...createLocalInferenceAgent(nowMs), isRunning: agent.isRunning === true, isComposingMessage: agent.isComposingMessage === true };
 }
 
 export function parseInferenceRouterTranscriptStore(value: unknown): Store {
@@ -34,13 +129,46 @@ export function parseInferenceRouterTranscriptStore(value: unknown): Store {
     const entries: StoredEntry[] = [];
     for (const raw of rawEntries) {
       const row = asRecord(raw);
-      if (row == null || !["codex", "claude-code", "openrouter"].includes(String(row.provider)) || !["user", "assistant"].includes(String(row.role)) || typeof row.content !== "string" || typeof row.id !== "string" || typeof row.timestampMs !== "number" || (row.clientNonce !== undefined && typeof row.clientNonce !== "string") || (row.richText !== undefined && typeof row.richText !== "string")) continue;
+      if (row == null || !["codex", "claude-code", "grok", "openrouter"].includes(String(row.provider)) || !["user", "assistant"].includes(String(row.role)) || typeof row.content !== "string" || typeof row.id !== "string" || typeof row.timestampMs !== "number" || (row.clientNonce !== undefined && typeof row.clientNonce !== "string") || (row.richText !== undefined && typeof row.richText !== "string")) continue;
       if (row.reactions !== undefined && (!Array.isArray(row.reactions) || row.reactions.some(reaction => asRecord(reaction) == null || typeof asRecord(reaction)!.emoji !== "string" || typeof asRecord(reaction)!.by !== "string"))) continue;
       entries.push(row as unknown as StoredEntry);
     }
     agents[agentId] = entries.slice(-200);
   }
   return { schemaVersion: 2, agents };
+}
+
+const LOCAL_ATTACHMENT_TEXT_CAP = 64 * 1024;
+
+async function readLocalAttachmentText(path: string, dispatchRemote: (method: string, args: unknown) => Promise<unknown>): Promise<string | null> {
+  try {
+    const local = await readFile(path);
+    if (local.includes(0)) return `(binary file, ${local.byteLength} bytes)`;
+    return local.subarray(0, LOCAL_ATTACHMENT_TEXT_CAP).toString("utf8");
+  } catch {}
+  try {
+    const remote = await dispatchRemote("readAttachmentText", { path });
+    const record = asRecord(remote);
+    if (record?.kind === "text" && typeof record.text === "string") return record.text;
+    if (record?.kind === "binary" && typeof record.bytes === "number") return `(binary file, ${record.bytes} bytes)`;
+    if (typeof remote === "string") return remote;
+  } catch {}
+  return null;
+}
+
+async function formatLocalAttachmentNote(
+  paths: readonly string[],
+  names: readonly string[],
+  dispatchRemote: (method: string, args: unknown) => Promise<unknown>,
+): Promise<string> {
+  if (paths.length === 0) return "";
+  const blocks: string[] = [`The user attached ${paths.length === 1 ? "a file" : `${paths.length} files`}:`];
+  for (const [index, path] of paths.entries()) {
+    const name = names[index] && names[index]!.length > 0 ? names[index]! : basename(path);
+    const text = await readLocalAttachmentText(path, dispatchRemote);
+    blocks.push(text == null ? `- ${name} (${path})` : `- ${name} (${path})\n\n${text}`);
+  }
+  return blocks.join("\n");
 }
 
 export function projectInferenceRouterTranscriptEntry(entry: StoredEntry): Record<string, unknown> {
@@ -54,11 +182,20 @@ export function createCoordinatorInferenceRouter(options: {
   readonly postEvent: (family: string, payload: unknown) => void;
   readonly dispatchRemote: (method: string, args: unknown) => Promise<unknown>;
   readonly now?: () => number;
+  readonly composeDelayMs?: number;
+  readonly schedule?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  readonly runProvider?: typeof runRoutedProviderText;
 }) {
   const settings = new SandSettingsStore(join(options.dataDir, "settings.json"));
   const storePath = join(options.dataDir, "inference-router-transcript.json");
   const now = options.now ?? Date.now;
   const queues = new Map<string, Promise<unknown>>();
+  const pluginPermissionWaiters = new Map<string, (resolution: string) => void>();
+  const sessionAllowedPlugins = new Set<string>();
+  const sessionDeniedPlugins = new Set<string>();
+  const runProvider = options.runProvider ?? runRoutedProviderText;
+  const composeDelayMs = options.composeDelayMs ?? 80;
+  const schedule = options.schedule ?? setTimeout;
 
   const load = async (): Promise<Store> => {
     try { return parseInferenceRouterTranscriptStore(JSON.parse(await readFile(storePath, "utf8"))); }
@@ -81,7 +218,8 @@ export function createCoordinatorInferenceRouter(options: {
     try {
       const remote = await options.dispatchRemote("listAgents", {});
       if (!Array.isArray(remote)) return () => {};
-      const project = (isRunning: boolean) => remote.map(raw => {
+      const roster = mergeLocalInferenceAgents(remote);
+      const project = (isRunning: boolean) => roster.map(raw => {
         const row = asRecord(raw);
         if (row?.id !== agentId) return raw;
         return { ...row, isRunning, isRunningTurn: isRunning, isComposingMessage: isRunning, isRetrying: false, ...(isRunning ? { currentActivity: { kind: "thinking" } } : { currentActivity: undefined }) };
@@ -119,13 +257,19 @@ export function createCoordinatorInferenceRouter(options: {
     return projectInferenceRouterTranscriptEntry(updated);
   };
   const execute = async (provider: Exclude<SandInferenceProvider, "cursor">, args: Record<string, unknown>) => {
-    const agentId = typeof args.agentId === "string" ? args.agentId : "";
+    const agentId = typeof args.agentId === "string" && args.agentId.length > 0 ? args.agentId : LOCAL_INFERENCE_AGENT_ID;
     const prompt = typeof args.prompt === "string" ? args.prompt : "";
     const richText = typeof args.richText === "string" ? args.richText : undefined;
     const clientNonce = typeof args.clientNonce === "string" ? args.clientNonce : randomUUID();
-    if (agentId.length === 0 || prompt.length === 0) throw new Error("Local inference routing requires an agentId and prompt");
+    const attachmentPaths = Array.isArray(args.attachmentPaths) ? args.attachmentPaths.filter((path): path is string => typeof path === "string" && path.length > 0) : [];
+    const attachmentNames = Array.isArray(args.attachmentNames) ? args.attachmentNames.filter((name): name is string => typeof name === "string") : [];
+    if (agentId.length === 0 || (prompt.length === 0 && attachmentPaths.length === 0)) throw new Error("Local inference routing requires an agentId and a prompt or attachment");
+    const attachmentNote = await formatLocalAttachmentNote(attachmentPaths, attachmentNames, options.dispatchRemote);
+    const promptForModel = [prompt, attachmentNote].filter(part => part.length > 0).join("\n\n");
     const timestampMs = now();
-    const [remote, beforeUser] = await Promise.all([options.dispatchRemote("getAgentTranscriptTail", { id: agentId }), load()]);
+    const beforeUser = await load();
+    let remote: unknown = null;
+    try { remote = await options.dispatchRemote("getAgentTranscriptTail", { id: agentId }); } catch { remote = null; }
     const remoteEntries = Array.isArray(asRecord(remote)?.entries) ? asRecord(remote)!.entries as unknown[] : [];
     const remoteTurn = remoteEntries.reduce<number>((highest, raw) => {
       const id = asRecord(raw)?.id;
@@ -137,18 +281,14 @@ export function createCoordinatorInferenceRouter(options: {
       return match == null ? highest : Math.max(highest, Number(match[1]));
     }, -1);
     const turn = Math.max(remoteTurn, localTurn) + 1;
-    const userEntry = { kind: "message", id: `t${turn}u`, role: "user", content: prompt, ...(richText === undefined ? {} : { richText }), isStreaming: false, timestampMs, clientNonce };
-    const withUser = await append(agentId, [{ provider, role: "user", content: prompt, ...(richText === undefined ? {} : { richText }), id: userEntry.id, clientNonce, timestampMs }]);
+    const userContent = promptForModel.length > 0 ? promptForModel : prompt;
+    const userEntry = { kind: "message", id: `t${turn}u`, role: "user", content: userContent, ...(richText === undefined ? {} : { richText }), isStreaming: false, timestampMs, clientNonce };
+    const withUser = await append(agentId, [{ provider, role: "user", content: userContent, ...(richText === undefined ? {} : { richText }), id: userEntry.id, clientNonce, timestampMs }]);
     emitTranscript(agentId, "appended", userEntry);
     const endActivity = await beginActivity(agentId);
-    // The shipped transcript intentionally suppresses its activity row as soon as
-    // the first streamed assistant entry arrives. Direct providers can produce that
-    // first delta in the same renderer reconciliation window as the roster update,
-    // making the genuine composing state imperceptible. The shipped virtualized
-    // transcript needs roughly 350 ms to materialize its trailing activity row,
-    // so keep the composing state authoritative long enough for a clearly
-    // perceptible rendered interval before normal token streaming begins.
-    await new Promise<void>(resolve => setTimeout(resolve, 1_200));
+    // Let the thinking avatar paint, then open an empty streaming bubble so the
+    // official transcript shows typing dots instead of waiting on a blank row.
+    await new Promise<void>(resolve => schedule(resolve, composeDelayMs));
     const messages = (withUser.agents[agentId] ?? []).map(entry => ({ role: entry.role, content: entry.content }));
     let content: string;
     const assistantTimestampMs = now();
@@ -159,28 +299,87 @@ export function createCoordinatorInferenceRouter(options: {
       emitTranscript(agentId, assistantStreamStarted ? "updated" : "appended", entry);
       assistantStreamStarted = true;
     };
-    const bridge = provider === "claude-code" ? await createRoutedMcpBridge({
-      listTools: () => options.dispatchRemote("listRoutedMcpTools", {}),
-      callTool: tool => options.dispatchRemote("executeRoutedMcpTool", { ...tool, agentId }),
-    }) : null;
-    const directTools = bridge == null ? await options.dispatchRemote("listRoutedMcpTools", {}) : undefined;
-    const tools = Array.isArray(directTools) ? directTools as Record<string, any>[] : undefined;
-    const onTextDelta = (_delta: string, accumulated: string) => emitAssistant(accumulated, true);
-    try { content = await runRoutedProviderText(provider, messages, bridge == null ? {
-      ...(tools === undefined ? {} : { tools }),
-      executeTool: async (definition, toolArgs, toolCallId) => await options.dispatchRemote("executeRoutedMcpTool", {
+    emitAssistant("", true);
+    const reveal = createPacedTextReveal({ emit: emitAssistant, schedule });
+    let listedTools: Record<string, any>[] = [];
+    try { listedTools = routedPluginToolRows(await options.dispatchRemote("listRoutedMcpTools", {})); }
+    catch { listedTools = []; }
+    const askPluginPermission = async (toolName: string, input: Record<string, unknown>, definition?: Record<string, unknown> | null) => {
+      const resolved = resolveRoutedPluginTool(toolName, listedTools, definition);
+      const identity = pluginPermissionIdentity(toolName, resolved);
+      if (sessionDeniedPlugins.has(identity.key)) return { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
+      if (sessionAllowedPlugins.has(identity.key)) return { behavior: "allow" as const, updatedInput: input };
+      const requestId = randomUUID();
+      const entryId = `t${turn}p${requestId.slice(0, 8)}`;
+      const ask = { requestId, status: "pending", action: "run-command", target: identity.target };
+      emitTranscript(agentId, "appended", {
+        kind: "send-message",
+        id: entryId,
+        message: { type: "local-tool-permission", ask },
+        timestampMs: now(),
+      });
+      const resolution = await new Promise<string>((resolve) => {
+        const timer = setTimeout(() => resolve("deny"), 5 * 60 * 1000);
+        pluginPermissionWaiters.set(requestId, (value) => { clearTimeout(timer); resolve(value); });
+      });
+      pluginPermissionWaiters.delete(requestId);
+      const allow = resolution === "allow-once" || resolution === "always";
+      if (resolution === "always") sessionAllowedPlugins.add(identity.key);
+      if (resolution === "never") sessionDeniedPlugins.add(identity.key);
+      const status = resolution === "always" ? "always" : resolution === "allow-once" ? "allow-once" : resolution === "never" ? "never" : "denied";
+      emitTranscript(agentId, "updated", {
+        kind: "send-message",
+        id: entryId,
+        message: { type: "local-tool-permission", ask: { ...ask, status } },
+        timestampMs: now(),
+      });
+      return allow
+        ? { behavior: "allow" as const, updatedInput: input }
+        : { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
+    };
+    const executePluginTool = async (definition: Record<string, any>, toolArgs: unknown, toolCallId: string) => {
+      const toolName = typeof definition.name === "string" && definition.name.length > 0
+        ? definition.name
+        : typeof definition.toolName === "string" ? definition.toolName : "plugin";
+      const decision = await askPluginPermission(toolName, asRecord(toolArgs) ?? {}, asRecord(definition));
+      if (decision.behavior !== "allow") throw new Error(decision.message ?? "The user denied this Alli Bot plugin.");
+      return await options.dispatchRemote("executeRoutedMcpTool", {
         providerIdentifier: definition.providerIdentifier,
         name: definition.name,
         toolName: definition.toolName,
         args: toolArgs,
         toolCallId,
         agentId,
-      }),
-      onTextDelta,
-    } : { mcpServerUrl: bridge.url, onTextDelta }); }
+      });
+    };
+    const bridge = provider === "claude-code" ? await createRoutedMcpBridge({
+      listTools: async () => listedTools,
+      callTool: async tool => {
+        try { return await executePluginTool(tool, tool.args, tool.toolCallId); }
+        catch (error) { return { result: { case: "error", value: { error: error instanceof Error ? error.message : String(error) } } }; }
+      },
+    }) : null;
+    const onTextDelta = (delta: string, accumulated: string) => reveal.push(delta, accumulated);
+    const canUseTool = async (toolName: string, input: Record<string, unknown>) => {
+      const identity = pluginPermissionIdentity(toolName, resolveRoutedPluginTool(toolName, listedTools, null));
+      if (sessionDeniedPlugins.has(identity.key)) return { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
+      return { behavior: "allow" as const, updatedInput: input };
+    };
+    try {
+      content = await runProvider(provider, messages, bridge == null ? {
+        tools: listedTools,
+        executeTool: async (definition, toolArgs, toolCallId) => await executePluginTool(definition, toolArgs, toolCallId),
+        onTextDelta,
+      } : { mcpServerUrl: bridge.url, onTextDelta, canUseTool });
+      reveal.push("", content);
+      content = await reveal.finish();
+    } catch (error) {
+      content = `Router error: ${error instanceof Error ? error.message : String(error)}`;
+      reveal.push("", content);
+      content = await reveal.finish();
+    }
     finally { endActivity(); await bridge?.close(); }
     await append(agentId, [{ provider, role: "assistant", content, id: assistantId, timestampMs: assistantTimestampMs }]);
-    emitAssistant(content, false);
     return { accepted: true, clientNonce, provider };
   };
 
@@ -188,6 +387,15 @@ export function createCoordinatorInferenceRouter(options: {
     provider(): SandInferenceProvider { return settings.getInferenceProvider(); },
     async dispatch(method: string, args: unknown): Promise<{ handled: boolean; value?: unknown }> {
       const provider = settings.getInferenceProvider();
+      if (method === "resolveLocalToolPermission") {
+        const record = asRecord(args) ?? {};
+        const requestId = typeof record.requestId === "string" ? record.requestId : "";
+        const waiter = pluginPermissionWaiters.get(requestId);
+        if (waiter != null) {
+          waiter(typeof record.resolution === "string" ? record.resolution : "deny");
+          return { handled: true, value: undefined };
+        }
+      }
       if (method === "reactToMessage") {
         const record = asRecord(args) ?? {};
         const agentId = typeof record.agentId === "string" ? record.agentId : "";
@@ -199,15 +407,24 @@ export function createCoordinatorInferenceRouter(options: {
           return { handled: true, value: undefined };
         }
       }
+      if (method === "createAgent") return { handled: false };
+      if (provider !== "cursor" && (method === "listAgents" || method === "countAgents")) {
+        let remote: unknown = [];
+        try { remote = await options.dispatchRemote("listAgents", args); } catch { remote = []; }
+        const agents = mergeLocalInferenceAgents(Array.isArray(remote) ? remote : []);
+        return { handled: true, value: method === "countAgents" ? agents.length : agents };
+      }
       if (provider !== "cursor" && ["getAgentTranscriptTail", "openAgentTail", "getAgentTranscriptWindow"].includes(method)) {
         const record = asRecord(args) ?? {};
         const agentId = typeof record.id === "string" ? record.id : "";
-        const [remote, local] = await Promise.all([options.dispatchRemote(method, args), load()]);
+        let remote: unknown = { entries: [] };
+        try { remote = await options.dispatchRemote(method, args); } catch { remote = { entries: [] }; }
+        const local = await load();
         const result = asRecord(remote);
-        if (result == null || !Array.isArray(result.entries) || agentId.length === 0) return { handled: true, value: remote };
-        const entries = [...result.entries, ...(local.agents[agentId] ?? []).map(projectInferenceRouterTranscriptEntry)];
+        const remoteEntries = result != null && Array.isArray(result.entries) ? result.entries : [];
+        const entries = [...remoteEntries, ...(local.agents[agentId] ?? []).map(projectInferenceRouterTranscriptEntry)];
         const limit = typeof record.limit === "number" && Number.isInteger(record.limit) && record.limit > 0 ? record.limit : 500;
-        return { handled: true, value: { ...result, entries: entries.slice(-limit) } };
+        return { handled: true, value: { ...(result ?? {}), entries: entries.slice(-limit) } };
       }
       if (method !== "sendPrompt" || provider === "cursor") return { handled: false };
       const record = asRecord(args) ?? {};

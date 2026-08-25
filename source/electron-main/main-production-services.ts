@@ -49,6 +49,7 @@ import type { SandAuthStatus } from "./account/cursor-auth.js";
 import type { SecureStorageCodec } from "./secrets/secret-store.js";
 import { recordLocalToolApproval as persistLocalToolApproval, clearLocalToolApprovals as clearPersistedLocalToolApprovals } from "../host/local-exec/local-tool-approvals.js";
 import { fetchSandAvailableModels } from "./models/cursor-model-catalog.js";
+import { SAND_PRODUCT_DISPLAY_NAME } from "../shared/product-name.js";
 import type { SandSettingsStore } from "../shared/node/settings/sand-settings-store.js";
 import type {
   ElectronMainDependencies,
@@ -69,6 +70,7 @@ export interface ElectronPackageMetadata {
 
 export interface ElectronProductionApp extends ElectronMainApp {
   getName(): string;
+  setName?(name: string): void;
   getPath(name: "userData" | "temp"): string;
   exit(code: number): void;
   setAsDefaultProtocolClient?(protocol: string, path?: string, args?: readonly string[]): boolean;
@@ -135,13 +137,14 @@ export function readElectronPackageMetadata(moduleDir: string, readText: (path: 
 
 export function resolveElectronProductionResources(args: {
   readonly moduleDir: string;
-  readonly app: Pick<ElectronProductionApp, "isPackaged" | "getName">;
+  readonly app: Pick<ElectronProductionApp, "isPackaged" | "getName" | "setName">;
   readonly env: NodeJS.ProcessEnv;
   readonly metadata: ElectronPackageMetadata;
   readonly attachProdBoxPreferencePath?: string;
 }): ElectronProductionResources {
   const preloadName = resolveSandMainWindowPreload({ isPackaged: args.app.isPackaged, env: args.env });
   const isAttachProdBox = !args.app.isPackaged && resolveAttachProdBoxPreferred(args.env, args.attachProdBoxPreferencePath);
+  args.app.setName?.(SAND_PRODUCT_DISPLAY_NAME);
   return {
     metadata: args.metadata,
     appName: args.app.getName(),

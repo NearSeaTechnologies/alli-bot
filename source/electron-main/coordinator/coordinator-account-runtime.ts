@@ -93,10 +93,14 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function cursorAccountSlot(status: CoordinatorAuthStatus): string | null {
-  if (status.kind !== "logged-in") return null;
-  const slot = status.authId ?? status.email;
-  return slot == null || slot.length === 0 ? null : slot;
+export const LOCAL_INFERENCE_ACCOUNT_SLOT = "alli-local";
+
+export function coordinatorAccountSlot(status: CoordinatorAuthStatus): string {
+  if (status.kind === "logged-in") {
+    const slot = status.authId ?? status.email;
+    if (slot != null && slot.length > 0) return slot;
+  }
+  return LOCAL_INFERENCE_ACCOUNT_SLOT;
 }
 
 /**
@@ -269,8 +273,8 @@ export function createCoordinatorAccountRuntime<Status extends CoordinatorAuthSt
       if (state.kind !== "blocked") return;
       const blocked = state;
       const version = observedVersion;
-      const nextSlot = cursorAccountSlot(settledStatus);
-      if (nextSlot === null || nextSlot !== blocked.slot) {
+      const nextSlot = coordinatorAccountSlot(settledStatus);
+      if (nextSlot !== blocked.slot) {
         state = { kind: "inactive" };
         return;
       }
@@ -368,7 +372,7 @@ export function createCoordinatorAccountRuntime<Status extends CoordinatorAuthSt
       if (state.kind !== "unstarted") return;
       startWork = (async () => {
         try {
-          await applyClaim(cursorAccountSlot(status), status, true, 0, (settled) => {
+          await applyClaim(coordinatorAccountSlot(status), status, true, 0, (settled) => {
             settledStatus = settled;
           });
         } finally {
@@ -380,7 +384,7 @@ export function createCoordinatorAccountRuntime<Status extends CoordinatorAuthSt
     observe(status) {
       if (isDisposed()) return;
       const version = ++observedVersion;
-      const nextSlot = cursorAccountSlot(status);
+      const nextSlot = coordinatorAccountSlot(status);
       if (nextSlot !== accountSlot()) revokeActiveRendererPortRequest();
       chain = chain.then(async () => {
         await startArrived;

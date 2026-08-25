@@ -2,6 +2,10 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
+import type { SandInferenceProvider } from "../inference-router.js";
+import { shouldSkipRoutedHostWake as skipWake } from "../inference-router.js";
+import { grokAuthPath, grokLoginInstalled, hasUsableGrokLogin } from "./inference-router-grok.js";
+
 export interface LocalInferenceCliStatus {
   readonly installed: boolean;
   readonly authenticated: boolean;
@@ -40,17 +44,33 @@ function hasUsableCodexLogin(path: string): boolean {
   } catch { return false; }
 }
 
-export function getLocalInferenceCliStatus(): { readonly codex: LocalInferenceCliStatus; readonly "claude-code": LocalInferenceCliStatus } {
+export function getLocalInferenceCliStatus(): { readonly codex: LocalInferenceCliStatus; readonly "claude-code": LocalInferenceCliStatus; readonly grok: LocalInferenceCliStatus } {
   const home = homedir();
   const codexPath = resolveCodexCliPath();
   const claudePath = resolveClaudeCodeCliPath();
+  const grokPath = firstExecutable([process.env.GROK_PATH, join(home, ".grok", "bin", "grok"), join(home, ".local", "bin", "grok"), ...pathCandidates("grok"), "/opt/homebrew/bin/grok", "/usr/local/bin/grok"]);
   const codexAuthPath = join(process.env.CODEX_HOME?.trim() || join(home, ".codex"), "auth.json");
   const hasCodexAuthFile = existsSync(codexAuthPath);
   const hasCodexLogin = hasUsableCodexLogin(codexAuthPath);
   return {
-    // Codex inference is a Grok Bot-owned HTTP transport authenticated by the
+    // Codex inference is a Alli Bot-owned HTTP transport authenticated by the
     // existing Codex login. The CLI binary is not in the request path.
     codex: { installed: hasCodexAuthFile, authenticated: hasCodexLogin, executablePath: codexPath },
     "claude-code": { installed: claudePath != null, authenticated: existsSync(join(home, ".claude", ".credentials.json")) || (process.env.ANTHROPIC_API_KEY?.length ?? 0) > 0, executablePath: claudePath },
+    grok: { installed: grokLoginInstalled(home) || grokPath != null, authenticated: hasUsableGrokLogin(grokAuthPath(home)), executablePath: grokPath },
   };
+}
+
+export function canExecuteRoutedInference(provider: SandInferenceProvider): boolean {
+  if (provider === "cursor") return true;
+  const status = getLocalInferenceCliStatus();
+  if (provider === "claude-code") return status["claude-code"].executablePath != null && status["claude-code"].authenticated;
+  if (provider === "codex") return status.codex.authenticated;
+  if (provider === "grok") return status.grok.authenticated;
+  if (provider === "openrouter") return (process.env.OPENROUTER_API_KEY?.trim().length ?? 0) > 0;
+  return false;
+}
+
+export function shouldSkipRoutedHostWake(provider: SandInferenceProvider, canExecute = canExecuteRoutedInference(provider)): boolean {
+  return skipWake(provider, canExecute);
 }

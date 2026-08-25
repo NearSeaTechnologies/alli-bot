@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { getSandRootDir, reanchorSandPath } from "../../host/host-paths.js";
+import { getSandProductionRootDir, getSandRootDir, reanchorSandPath } from "../../host/host-paths.js";
 import { isPathWithin } from "../../shared/node/paths.js";
 
 export const STAGING_DIRNAME = "attachment-staging";
@@ -20,10 +20,13 @@ export interface AttachmentManagerDeps {
   readonly reanchorPath?: (path: string) => string;
 }
 
-export function getDesktopAttachmentStagingDir(): string { return join(getSandRootDir(), STAGING_DIRNAME); }
+export function getDesktopAttachmentStagingDir(): string { return join(getSandProductionRootDir(), STAGING_DIRNAME); }
 
 export function isWithinDesktopAttachmentStaging(filePath: unknown): boolean {
-  return typeof filePath === "string" && filePath.length > 0 && isPathWithin(getDesktopAttachmentStagingDir(), reanchorSandPath(filePath));
+  if (typeof filePath !== "string" || filePath.length === 0) return false;
+  const resolved = reanchorSandPath(filePath);
+  if (isPathWithin(getDesktopAttachmentStagingDir(), resolved)) return true;
+  return isPathWithin(join(getSandRootDir(), STAGING_DIRNAME), resolved);
 }
 
 export function readDesktopImageSize(buffer: Buffer, deps: Pick<AttachmentManagerDeps, "nativeImage" | "readPortableDimensions">): ImageSize | null {

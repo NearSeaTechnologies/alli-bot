@@ -21,6 +21,10 @@ import { nextEntryId } from "./transcript-entry-ids.js";
 import { getTranscript } from "./transcript-store.js";
 import { classifyAgentError } from "./turn-runtime.js";
 import type { TranscriptManagerLike } from "./transcript-hub.js";
+import { join } from "node:path";
+import { shouldSkipRoutedHostWake } from "../../../shared/node/inference-router-local.js";
+import { SandSettingsStore } from "../../../shared/node/settings/sand-settings-store.js";
+import { getSandRootDir } from "../../host-paths.js";
 
 export function distinctChannelAddresses(
   envelopes: readonly { address: any }[],
@@ -446,6 +450,8 @@ export class BackgroundWakes {
     trayTitle: string,
     errorSource = requestSource,
   ): Promise<void> {
+    const provider = new SandSettingsStore(join(getSandRootDir(), "settings.json")).getInferenceProvider();
+    if (shouldSkipRoutedHostWake(provider)) return;
     const runner = this.tm.runnerRegistry.getRunner(session);
     this.tm.runLifecycle.beginSessionRun(session);
     await this.tm.runLifecycle.enqueueExclusiveRun(

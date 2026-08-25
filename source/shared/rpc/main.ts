@@ -45,6 +45,7 @@ export const MAIN_METHOD_TABLE = {
   readAttachmentText: { args: "object" },
   readAttachmentBytes: { args: "object" },
   stageAttachmentBytes: { args: "object" },
+  pickComposerFiles: { args: "none" },
   downloadAttachment: { args: "object" },
   commitStagedAttachments: { args: "object" },
   discardStagedAttachment: { args: "object" },

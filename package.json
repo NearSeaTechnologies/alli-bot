@@ -17,6 +17,9 @@
     "native:build:electron": "node scripts/build-tree-sitter-electron.mjs",
     "package": "npm run check && node scripts/package-macos.mjs",
     "package:diagnostic": "npm run check && node scripts/package-fidelity-diagnostic.mjs",
+    "reload": "node scripts/reload-alli-bot.mjs",
+    "reload:watch": "node scripts/reload-alli-bot.mjs --watch",
+    "sandbox:tunnel:install": "bash scripts/install-alli-sandbox-tunnel.sh",
     "publication:check": "node scripts/verify-publication-tree.mjs",
     "postinstall": "node scripts/apply-third-party-patches.mjs",
     "smoke": "node scripts/smoke.mjs",
@@ -130,5 +133,12 @@
     "node-addon-api": "8.5.0",
     "@tiptap/extension-bubble-menu": "3.14.0",
     "@tiptap/extension-floating-menu": "3.14.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true,
+    "protobufjs@7.6.5": true,
+    "tree-sitter@0.21.1": true,
+    "tree-sitter-bash@0.21.0": true
   }
 }

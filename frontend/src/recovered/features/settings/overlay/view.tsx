@@ -18,9 +18,7 @@ export interface SettingsSection {
 /** Exact registry recovered from main renderer binding wDn. */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: "general", label: "General", icon: "settings-gear" },
-  { id: "router", label: "Router", icon: "git-branch" },
-  { id: "usage", label: "Usage & Billing", icon: "chart-bars" },
-  { id: "beta", label: "Updates", icon: "cloud-download" }
+  { id: "router", label: "Router (Alli)", icon: "git-branch" }
 ];
 
 // @evidence src/app/dist/renderer/assets/index-UbX-y3il.js#byteOffset=5468252
@@ -83,7 +81,7 @@ export function SettingsModalShell({
       className="sand-settings-dialog"
       closeOnBackdrop={closeOnBackdrop}
       closeOnEscape={closeOnEscape}
-      label="Grok Bot settings"
+      label="Alli Bot settings"
       onClose={onClose}
       open={isOpen}
       trapFocus={trapFocus}

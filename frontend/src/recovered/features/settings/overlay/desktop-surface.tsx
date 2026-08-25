@@ -300,7 +300,7 @@ export function SettingsDesktopSurface({ bridge, coordinatorClient = null, initi
           />
         );
       }}
-      showUsage={snapshot != null && (routerProvider !== "cursor" || shouldShowUsageSettings(snapshot.usagePageFeatureGateEnabled, snapshot.usage))}
+      showUsage={snapshot != null && shouldShowUsageSettings(snapshot.usagePageFeatureGateEnabled, snapshot.usage)}
       iconPlatform={bridge.platform === "win32" ? "windows" : "mac"}
       closeOnBackdrop={!cancelTrialDialogOpen}
       closeOnEscape={!cancelTrialDialogOpen}

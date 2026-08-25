@@ -1,0 +1,15 @@
+[Unit]
+Description=Alli Bot sandbox computer
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/alli-bot/ensure.sh
+ExecStop=/usr/bin/docker stop grok-bot-local-vm
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

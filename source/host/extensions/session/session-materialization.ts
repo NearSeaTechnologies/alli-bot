@@ -9,6 +9,7 @@ import { automationStoreForDbPath, channelStoreForDbPath, workflowStoreForDbPath
 import type { AgentWorkerPool } from "../../agent-isolation/agent-worker-pool.js";
 
 export const MAX_AGENTS_PER_USER = 50;
+const RESERVED_AGENT_FOLDER_IDS = new Set(["alli-local"]);
 export const DEFAULT_AGENT_AUTOMATIONS: readonly unknown[] = [];
 export class SandAgentMissingError extends Error { constructor(agentId: string) { super(`Sand agent ${agentId} does not exist`); this.name = "SandAgentMissingError"; } }
 export class SandAgentLimitError extends Error { constructor() { super(`Agent limit of ${MAX_AGENTS_PER_USER} reached`); this.name = "SandAgentLimitError"; } }
@@ -51,7 +52,12 @@ export class SandSessionMaterialization {
   enqueueMint<T>(run: () => Promise<T>): Promise<T> { const next = this.mintChain.then(run, run); this.mintChain = next.then(() => {}, () => {}); return next; }
 
   async mintAgent<T>(mint: (agentId: string) => Promise<T>): Promise<T> {
-    return this.enqueueMint(async () => { if (await this.isAgentCapReached()) throw new SandAgentLimitError(); return this.runMint(randomUUID(), mint); });
+    return this.enqueueMint(async () => {
+      if (await this.isAgentCapReached()) throw new SandAgentLimitError();
+      let agentId = randomUUID();
+      while (RESERVED_AGENT_FOLDER_IDS.has(agentId) || this.host.agentExists(agentId)) agentId = randomUUID();
+      return this.runMint(agentId, mint);
+    });
   }
   private async runMint<T>(agentId: string, mint: (agentId: string) => Promise<T>): Promise<T> {
     try { return await mint(agentId); }
@@ -61,16 +67,22 @@ export class SandSessionMaterialization {
   async createFallbackSession(open: (agentId: string) => Promise<MaterializedSession>): Promise<MaterializedSession> {
     return this.enqueueMint(async () => {
       if (await this.isAgentCapReached()) {
-        for (const agentId of await this.listAgentRecordIds()) { try { return await open(agentId); } catch (error) { this.host.report?.({ family: "materialize", kind: "fallback_adopt_failed", agentId, errorClass: error instanceof Error ? error.name : typeof error }); } }
+        for (const agentId of await this.listAgentRecordIds()) {
+          if (RESERVED_AGENT_FOLDER_IDS.has(agentId)) continue;
+          try { return await open(agentId); } catch (error) { this.host.report?.({ family: "materialize", kind: "fallback_adopt_failed", agentId, errorClass: error instanceof Error ? error.name : typeof error }); }
+        }
         throw new SandAgentLimitError();
       }
-      return this.runMint(randomUUID(), (agentId) => this.materializeSession(agentId, undefined, "user"));
+      let agentId = randomUUID();
+      while (RESERVED_AGENT_FOLDER_IDS.has(agentId) || this.host.agentExists(agentId)) agentId = randomUUID();
+      return this.runMint(agentId, (id) => this.materializeSession(id, undefined, "user"));
     });
   }
   private compose(agentId: string, dbPath: string, db: SandAgentDb): MaterializedSession {
     return { id: agentId, dbPath, db, agentStore: this.host.createAgentStore({ pool: this.requireWorkerPool(), agentId, dbPath, db }), memory: this.host.createMemoryStore(dirname(dbPath)), automations: automationStoreForDbPath(dbPath, this.host.resolveUserTimeZone), workflows: workflowStoreForDbPath(dbPath, this.host.resolveUserTimeZone), channels: channelStoreForDbPath(dbPath) };
   }
   async materializeSession(agentId: string, profile?: Partial<SandAgentProfile>, origin: "user" | "dev" = "user", purpose?: string): Promise<MaterializedSession> {
+    if (RESERVED_AGENT_FOLDER_IDS.has(agentId)) throw new SandAgentMissingError(agentId);
     const dbPath = getAgentDbPath(this.host.rootDir, agentId), db = new SandAgentDb(dbPath);
     try {
       db.set("agentId", agentId); db.setAgentOrigin(origin); if (purpose != null) db.setAgentPurpose(purpose);

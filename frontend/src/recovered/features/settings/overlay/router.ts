@@ -1,45 +1,38 @@
 import type { AgentDesktopBridge } from "../../../contracts/desktop-bridge";
 
-export type RouterProviderId = "cursor" | "claude-code" | "codex" | "openrouter";
+export type RouterProviderId = "claude-code" | "codex" | "grok";
 
 export interface RouterProvider {
   readonly id: RouterProviderId;
   readonly label: string;
   readonly description: string;
   readonly usageDescription: string;
-  readonly usageSource: "cursor" | "external";
+  readonly usageSource: "external";
 }
 
-export const DEFAULT_ROUTER_PROVIDER: RouterProviderId = "cursor";
+export const DEFAULT_ROUTER_PROVIDER: RouterProviderId = "claude-code";
 export const ROUTER_PROVIDER_PERSISTENCE_KEY = "settings.router-provider.v1";
 
 export const ROUTER_PROVIDERS: readonly RouterProvider[] = [
   {
-    id: "cursor",
-    label: "Cursor",
-    description: "Use your signed-in Cursor account and its hosted agent models.",
-    usageDescription: "Included and on-demand usage from your Cursor account.",
-    usageSource: "cursor"
-  },
-  {
     id: "claude-code",
-    label: "Claude Code",
-    description: "Use Anthropic's Claude Code provider for agent requests.",
-    usageDescription: "Claude Code usage is managed by your Anthropic account and is not exposed as an in-app meter.",
+    label: "Claude",
+    description: "Use your existing Claude Code sign-in. Does not use Cursor usage.",
+    usageDescription: "Claude usage is billed to your Anthropic account.",
     usageSource: "external"
   },
   {
     id: "codex",
     label: "Codex",
-    description: "Use OpenAI's Codex provider for agent requests.",
-    usageDescription: "Codex usage is managed by your OpenAI account and is not exposed as an in-app meter.",
+    description: "Use your existing ChatGPT sign-in from Codex. Does not use Cursor usage.",
+    usageDescription: "Codex usage is billed to your OpenAI / ChatGPT account.",
     usageSource: "external"
   },
   {
-    id: "openrouter",
-    label: "OpenRouter",
-    description: "Use models and billing from your OpenRouter account.",
-    usageDescription: "OpenRouter usage and spend are managed in your OpenRouter account and are not exposed as an in-app meter.",
+    id: "grok",
+    label: "Grok",
+    description: "Use your existing Grok / xAI sign-in. Bills your xAI account, not Cursor.",
+    usageDescription: "Grok usage is billed to your xAI account.",
     usageSource: "external"
   }
 ];

@@ -29,7 +29,7 @@ export const PRODUCTION_UI_EVIDENCE = {
   signOutConfirmation: {
     artifact: "index-UbX-y3il.js",
     location: "index-UbX-y3il.js:49084",
-    anchors: ["Sign out?", "You’ll need to sign in again to use your Cursor account with Grok Bot.", "Sign out", "Cancel"]
+    anchors: ["Sign out?", "You’ll need to sign in again to use your Cursor account with Alli Bot.", "Sign out", "Cancel"]
   },
   privacyBlockedDialog: {
     artifact: "index-UbX-y3il.js",
@@ -44,12 +44,12 @@ export const PRODUCTION_UI_EVIDENCE = {
   signInLanding: {
     artifact: "index-UbX-y3il.js",
     location: "index-UbX-y3il.js:130769",
-    anchors: ["Grok Bot", "Your team of always-on agents that you can give real work to.", "Sign in", "Continue in your browser", "Reopen link", "Cancel"]
+    anchors: ["Alli Bot", "Your team of always-on agents that you can give real work to.", "Sign in", "Continue in your browser", "Reopen link", "Cancel"]
   },
   signedInOnboarding: {
     artifact: "index-UbX-y3il.js",
     location: "index-UbX-y3il.js:512@utf8:4479930,5391939,5397272,5400625,5412826,5441790,5624537",
-    anchors: ["Meet Grok Bot", "Grok Bot has its own computer and works just like you", "Give each Bot a job", "What do you use every day?", "New Bot", "Get started", "Suggestions", "sand-onboarding__cast-", "sand-onboarding__suggestion-card", "demo-computer-wallpaper-BO7Ye4dV.jpg", "Grok Bot couldn’t finish setting up", "Try again"]
+    anchors: ["Meet Alli Bot", "Alli Bot has its own computer and works just like you", "Give each Bot a job", "What do you use every day?", "New Bot", "Get started", "Suggestions", "sand-onboarding__cast-", "sand-onboarding__suggestion-card", "demo-computer-wallpaper-BO7Ye4dV.jpg", "Alli Bot couldn’t finish setting up", "Try again"]
   },
   onboardingJobsTools: {
     artifact: "index-UbX-y3il.js",
@@ -84,14 +84,14 @@ export const PRODUCTION_UI_EVIDENCE = {
   about: {
     artifact: "index-UbX-y3il.js",
     location: "index-UbX-y3il.js:137500",
-    anchors: ["Grok Bot", "Copyright © 2026 SpaceXAI", "Copy version info", "Copied", "Release Track:", "OS:"]
+    anchors: ["Alli Bot", "Copyright © 2026 SpaceXAI", "Copy version info", "Copied", "Release Track:", "OS:"]
   },
   feedback: {
     artifact: "index-UbX-y3il.js",
     location: "index-UbX-y3il.js:137570",
     anchors: [
       "Send Feedback",
-      'const xSe = "Grok Bot"',
+      'const xSe = "Alli Bot"',
       "Tell the ",
       " team what happened or what you want changed. Reports go straight to the team.",
       "What happened? What did you expect?",
@@ -117,7 +117,7 @@ export const PRODUCTION_UI_EVIDENCE = {
   computerShell: {
     artifact: "index-UbX-y3il.js",
     location: "index-UbX-y3il.js:118744-119343,119626-119855,129447-129479,132921-132985@utf8:4787052,4805127,4805446,4806081,4806105,4806128,4810954,4812808,4831166,4832830,4835242,4837308,4845836",
-    anchors: ["Grok Bot's Computer", "sand:vnc-liveness", "sand:vnc-viewer-visible", "sand:vnc-host-key", "sand:vnc-session", "persist:sand-forever-box", "sand-box-vnc-pool", "sand-computer-monitor-strip", "sand-computer-banner", "sand-computer-fullscreen", "sand-computer-cursor-overlay", "sand-computer-preview", "sand-box-handoff-card"]
+    anchors: ["Alli Bot's Computer", "sand:vnc-liveness", "sand:vnc-viewer-visible", "sand:vnc-host-key", "sand:vnc-session", "persist:sand-forever-box", "sand-box-vnc-pool", "sand-computer-monitor-strip", "sand-computer-banner", "sand-computer-fullscreen", "sand-computer-cursor-overlay", "sand-computer-preview", "sand-box-handoff-card"]
   },
   settingsRegistry: {
     artifact: "index-UbX-y3il.js",
@@ -127,7 +127,7 @@ export const PRODUCTION_UI_EVIDENCE = {
   settingsDialog: {
     artifact: "index-BlqerJhg.js",
     location: "index-BlqerJhg.js:54,592,702",
-    anchors: ["Grok Bot settings", "Updates", "Auto-review", "Check for Updates"]
+    anchors: ["Alli Bot settings", "Updates", "Auto-review", "Check for Updates"]
   },
   plugins: {
     artifact: "view-B5Ug8wEm.js",
@@ -170,7 +170,7 @@ export const UI_TEXT = {
   copied: "Copied",
   copyVersionInfo: "Copy version info",
   copyright: "Copyright © 2026 SpaceXAI",
-  feedbackIntroduction: "Tell the Grok Bot team what happened or what you want changed. Reports go straight to the team.",
+  feedbackIntroduction: "Tell the Alli Bot team what happened or what you want changed. Reports go straight to the team.",
   feedbackPlaceholder: "What happened? What did you expect?",
   helpCenter: "Help Center",
   hiddenBots: "Hidden Bots",
@@ -184,7 +184,7 @@ export const UI_TEXT = {
   signIn: "Sign in",
   signInTagline: "Your team of always-on agents that you can give real work to.",
   signOut: "Sign out",
-  signOutDescription: "You’ll need to sign in again to use your Cursor account with Grok Bot.",
+  signOutDescription: "You’ll need to sign in again to use your Cursor account with Alli Bot.",
   signOutTitle: "Sign out?",
-  title: "Grok Bot"
+  title: "Alli Bot"
 } as const;

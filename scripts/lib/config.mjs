@@ -24,8 +24,10 @@ export const outputDir = path.join(repoRoot, "dist");
 const configuredOutputName = process.env.GROK_BOT_OUTPUT_APP_NAME?.trim();
 export const outputApp = path.join(
   outputDir,
-  configuredOutputName ? path.basename(configuredOutputName) : "Grok Bot 0.18 Reconstructed.app"
+  configuredOutputName ? path.basename(configuredOutputName) : "Alli Bot.app"
 );
+export const outputDmg = path.join(outputDir, "Alli Bot.dmg");
+export const installedAlliBotApp = "/Applications/Alli Bot.app";
 export const fidelityOutputApp = path.join(outputDir, "Grok Bot 0.18 Fidelity.app");
 export const fidelityOutputAppForAsarHash = asarHash => {
   if (!/^[0-9a-f]{64}$/.test(asarHash)) throw new TypeError("A full lowercase ASAR SHA-256 is required");
@@ -35,12 +37,12 @@ export const fidelityInstalledAppForAsarHash = asarHash => path.join("/Applicati
 export const recoveredFrontendDir = path.join(repoRoot, "recovered", "frontend");
 export const recoveredRendererDir = path.join(recoveredFrontendDir, "app");
 export const frontendDir = path.join(repoRoot, "frontend");
-export const devOutputApp = path.join(outputDir, "Grok Bot 0.18 Dev.app");
+export const devOutputApp = path.join(outputDir, "Alli Bot Dev.app");
 export const devProfileDir = path.join(cacheDir, "dev-profile");
 
 export const upstreamVersion = "0.18.0";
-export const reconstructedBundleId = "com.anysphere.sand.reconstructed";
-export const reconstructedName = "Grok Bot 0.18 Reconstructed";
+export const reconstructedBundleId = "team.alongside.allibot";
+export const reconstructedName = "Alli Bot";
 export const fidelityBundleId = "com.anysphere.sand.reconstructed.fidelity";
 export const fidelityName = "Grok Bot 0.18 Fidelity";
 export const dmgUrl = "https://downloads.cursor.com/grokbot/stable/darwin-arm64/0.18.0/Grok_Bot_0.18.0.dmg";

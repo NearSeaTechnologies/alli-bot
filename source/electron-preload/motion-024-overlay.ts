@@ -1,0 +1,111 @@
+export const MOTION_024_STYLE_ID = "sand-motion-024";
+
+/** Official Grok Bot 0.24.0 motion overlay. Injected over the shipped renderer. */
+export const MOTION_024_OVERLAY_CSS = `
+:root {
+  --cursor-duration-instant: 50ms;
+  --cursor-duration-fast: .1s;
+  --cursor-duration-normal: .15s;
+  --cursor-duration-slow: .2s;
+  --cursor-duration-slower: .3s;
+  --cursor-easing-default: cubic-bezier(.16, 1, .3, 1);
+  --cursor-easing-out: cubic-bezier(.16, 1, .3, 1);
+  --cursor-easing-out-quint: cubic-bezier(.16, 1, .3, 1);
+  --cursor-easing-out-strong: cubic-bezier(.165, .84, .44, 1);
+  --cursor-easing-out-cubic: cubic-bezier(.215, .61, .355, 1);
+  --cursor-easing-in-out-strong: cubic-bezier(.77, 0, .175, 1);
+  --ui-press-scale: .98;
+  --ui-tray-closed-transform: translate3d(0, 4px, 0) scale(.99);
+  --ui-tray-open-transform: translate3d(0, 0, 0) scale(1);
+  --sand-sidebar-anim-duration: .2s;
+}
+@keyframes sand-024-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes sand-024-tray {
+  from { opacity: 0; transform: translate3d(0, 4px, 0) scale(.99); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes sand-024-fade-slide {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes sand-024-popover-bottom {
+  from { opacity: 0; transform: translate3d(0, -6px, 0) scale(.94); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes sand-024-popover-top {
+  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(.94); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes sand-024-popover-left {
+  from { opacity: 0; transform: translate3d(6px, 0, 0) scale(.94); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes sand-024-popover-right {
+  from { opacity: 0; transform: translate3d(-6px, 0, 0) scale(.94); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+.sand-kit-button, .sand-kit-icon-button, .sand-agent-item, .sand-agents-sidebar__plugins,
+.sand-agents-sidebar__account > button, .sand-agents-section__header,
+.sand-agents-sidebar__new-actions button, .sand-prompt-actions-row button {
+  transition: background-color var(--cursor-duration-fast) ease, color var(--cursor-duration-fast) ease,
+    opacity var(--cursor-duration-fast) ease, transform var(--cursor-duration-fast) var(--cursor-easing-out-quint);
+}
+.sand-kit-button:not(:disabled):active, .sand-kit-icon-button:not(:disabled):active, .sand-agent-item:active,
+.sand-agents-sidebar__plugins:active, .sand-agents-sidebar__account > button:active,
+.sand-agents-section__header:active, .sand-agents-sidebar__new-actions button:active,
+.sand-prompt-actions-row button:active, .sand-alert-dialog footer button:active, [role="menuitem"]:active {
+  transform: scale(var(--ui-press-scale));
+}
+.ui-menu__content, .ui-menu__tooltip, [aria-label="Account"].ui-menu__content,
+[role="menu"], [role="listbox"], [role="dialog"].sand-alert-dialog, .sand-alert-dialog {
+  transform-origin: var(--transform-origin, center top);
+  animation: sand-024-pop var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
+}
+[data-starting-style], [data-ending-style] { opacity: 0; transform: translateY(-4px) scale(.96); }
+[data-starting-style][data-side="bottom"], [data-ending-style][data-side="bottom"] {
+  animation: sand-024-popover-bottom var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
+}
+[data-starting-style][data-side="top"], [data-ending-style][data-side="top"] {
+  animation: sand-024-popover-top var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
+}
+[data-starting-style][data-side="left"], [data-ending-style][data-side="left"] {
+  animation: sand-024-popover-left var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
+}
+[data-starting-style][data-side="right"], [data-ending-style][data-side="right"] {
+  animation: sand-024-popover-right var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
+}
+.sand-tray, .sand-tray-stack .sand-tray, .sand-outline-panel {
+  animation: sand-024-tray .18s var(--cursor-easing-out-quint) both;
+}
+.sand-onboarding__step { animation: sand-024-fade-slide var(--cursor-duration-slow) var(--cursor-easing-out-quint) both; }
+.sand-onboarding__step[aria-hidden="true"] { animation: sand-024-fade-slide .12s var(--cursor-easing-out-quint) reverse both; }
+.sand-onboarding__suggestion-card { animation: sand-024-fade-slide var(--cursor-duration-slow) var(--cursor-easing-out-quint) both; }
+.sand-onboarding__suggestion-card:nth-child(1) { animation-delay: 0ms; }
+.sand-onboarding__suggestion-card:nth-child(2) { animation-delay: 40ms; }
+.sand-onboarding__suggestion-card:nth-child(3) { animation-delay: 80ms; }
+.sand-onboarding__job-bubble {
+  transition: opacity var(--cursor-duration-slow) var(--cursor-easing-out-quint),
+    transform var(--cursor-duration-slow) var(--cursor-easing-out-quint);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sand-kit-button, .sand-kit-icon-button, .sand-agent-item, .sand-agents-sidebar__plugins,
+  .sand-agents-sidebar__account > button, .ui-menu__content, .ui-menu__tooltip, .sand-alert-dialog,
+  .sand-tray, .sand-outline-panel, .sand-onboarding__step, .sand-onboarding__suggestion-card,
+  .sand-onboarding__job-bubble, [data-starting-style], [data-ending-style] {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transform: none !important;
+  }
+}
+`;
+
+export function installMotion024Overlay(doc: { getElementById(id: string): unknown; documentElement: { appendChild(node: unknown): unknown }; createElement(tag: string): { id: string; textContent: string } }): void {
+  if (doc.getElementById(MOTION_024_STYLE_ID) != null) return;
+  const style = doc.createElement("style");
+  style.id = MOTION_024_STYLE_ID;
+  style.textContent = MOTION_024_OVERLAY_CSS;
+  doc.documentElement.appendChild(style);
+}

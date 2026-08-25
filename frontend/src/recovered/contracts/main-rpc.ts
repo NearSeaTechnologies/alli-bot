@@ -12,7 +12,7 @@ export const MAIN_METHOD_TABLE = {
   getLocalToolPermission: "none", getLocalToolPermissionCeiling: "none", setLocalToolPermission: "object",
   recordLocalToolApproval: "object", clearLocalToolApprovals: "none", getSidebarCollapsed: "none", setSidebarCollapsed: "object",
   pickAvatarSource: "none", pickAvatarFile: "none", generateAgentAvatarImage: "object", resolveAttachmentMedia: "object",
-  readAttachmentText: "object", readAttachmentBytes: "object", stageAttachmentBytes: "object", downloadAttachment: "object",
+  readAttachmentText: "object", readAttachmentBytes: "object", stageAttachmentBytes: "object", pickComposerFiles: "none", downloadAttachment: "object",
   commitStagedAttachments: "object", discardStagedAttachment: "object", forceRecreateComputer: "none", updateComputer: "object",
   forceReconnectGateway: "none", getExperimentsSnapshot: "none", applyFeatureFlagOverride: "object", refreshFeatureFlags: "none",
   startRpcTraceWindow: "none", getAgentDefaultModel: "none", setAgentDefaultModel: "object", getComputerUseModel: "none",

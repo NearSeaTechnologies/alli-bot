@@ -6,6 +6,7 @@ import {
   builtAsar,
   builtAsarUnpacked,
   repoRoot,
+  reconstructedName,
   sourceAppDir,
   stagedAppDir
 } from "./config.mjs";
@@ -145,13 +146,12 @@ export async function buildAsar({
   await mkdir(buildRoot, { recursive: true });
   await cp(sourceAppDir, stageRoot, { recursive: true, dereference: false, preserveTimestamps: true });
 
-  if (process.env.GROK_BOT_BUILD_DEV_APP === "1") {
-    const stagedPackagePath = path.join(stageRoot, "package.json");
-    const stagedPackage = JSON.parse(await readFile(stagedPackagePath, "utf8"));
-    stagedPackage.sandLab = true;
-    stagedPackage.productName = "Grok Bot 0.18 Dev";
-    await writeFile(stagedPackagePath, `${JSON.stringify(stagedPackage, null, 2)}\n`);
-  }
+  const stagedPackagePath = path.join(stageRoot, "package.json");
+  const stagedPackage = JSON.parse(await readFile(stagedPackagePath, "utf8"));
+  stagedPackage.productName = process.env.GROK_BOT_BUILD_DEV_APP === "1" ? `${reconstructedName} Dev` : reconstructedName;
+  stagedPackage.description = `${reconstructedName} desktop agent`;
+  if (process.env.GROK_BOT_BUILD_DEV_APP === "1") stagedPackage.sandLab = true;
+  await writeFile(stagedPackagePath, `${JSON.stringify(stagedPackage, null, 2)}\n`);
 
   for (const directory of ["deps", "native"]) {
     const source = path.join(runtimeUnpacked, directory);

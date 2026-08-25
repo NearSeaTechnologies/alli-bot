@@ -236,7 +236,7 @@ export type McpAuthenticationResult =
 /** Exact top-level keys exposed with contextBridge in the public 0.18 preload. */
 export const DESKTOP_BRIDGE_TOP_LEVEL_KEYS = [
   "resolveAttachmentMedia", "readAttachmentText", "readAttachmentBytes", "downloadAttachment",
-  "getLinkMetadata", "openExternal", "openCloudAgent", "stageAttachmentBytes",
+  "getLinkMetadata", "openExternal", "openCloudAgent", "pickComposerFilePayloads", "stageAttachmentBytes",
   "commitStagedAttachments", "discardStagedAttachment", "mcp", "forceGatewayReconnect",
   "pickAvatarSource", "pickAvatarFile", "generateAgentAvatarImage", "onFocusAgent",
   "onDeepLink", "deepLinksReady", "getBoxMigrationStatus", "onBoxMigration",
@@ -381,6 +381,7 @@ export interface DesktopBridge {
   getLinkMetadata(url: string): Promise<unknown>;
   openExternal(url: string): Promise<void>;
   openCloudAgent(bcId: string): Promise<void>;
+  pickComposerFilePayloads(): Promise<readonly { name: string; bytes: Uint8Array }[]>;
   stageAttachmentBytes(filename: string, bytes: Uint8Array): Promise<StagedAttachmentResult>;
   commitStagedAttachments(paths: readonly string[], filenames: readonly string[]): Promise<string[] | null>;
   discardStagedAttachment(path: string): Promise<void>;
@@ -480,6 +481,6 @@ export function hasDesktopBridge(value: unknown): value is DesktopBridge {
 }
 
 export function requireDesktopBridge(value: unknown): DesktopBridge {
-  if (!hasDesktopBridge(value)) throw new Error("The Grok Bot desktop preload bridge is unavailable.");
+  if (!hasDesktopBridge(value)) throw new Error("The Alli Bot desktop preload bridge is unavailable.");
   return value;
 }

@@ -1,4 +1,15 @@
+import { randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { extname, join } from "node:path";
+import {
+  coerceAttachmentBytes,
+  normalizeCommitStagedRequest,
+  normalizePathRequest,
+  normalizeStageAttachmentRequest,
+} from "../shared/media/attachment-desktop-args.js";
 import { CLIENT_PERSISTENCE_CHANNELS } from "../shared/persistence.js";
+import { installMotion024Overlay } from "./motion-024-overlay.js";
 import {
   createCoordinatorPortBroker,
   wrapTransferredCoordinatorPort,
@@ -94,6 +105,29 @@ function hasDevRestart(env: NodeJS.ProcessEnv): boolean {
   return env.SAND_RESTART_EXIT_CODE != null && env.SAND_RESTART_EXIT_CODE.length > 0;
 }
 
+function logAttach(event: string, detail: Record<string, unknown>): void {
+  try {
+    appendFileSync(
+      join(homedir(), ".grokbot", "attach-debug.log"),
+      `${new Date().toISOString()} ${event} ${JSON.stringify(detail)}\n`,
+    );
+  } catch {
+    // Diagnostic only; never fail attach because the log could not be written.
+  }
+}
+
+function isSafeAttachmentFilename(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 255 && !value.includes("/") && !value.includes("\\") && !value.includes("\0");
+}
+
+function stageAttachmentLocally(filename: string, payload: Uint8Array): { ok: true; path: string } {
+  const dir = join(homedir(), ".grokbot", "attachment-staging");
+  mkdirSync(dir, { recursive: true });
+  const stagedPath = join(dir, `${Date.now()}-${randomUUID()}${extname(filename)}`);
+  writeFileSync(stagedPath, Buffer.from(payload));
+  return { ok: true, path: stagedPath };
+}
+
 export function createDesktopPreloadBridge(options: {
   readonly ipc: PreloadIpcRenderer;
   readonly webFrame: PreloadWebFrame;
@@ -113,13 +147,44 @@ export function createDesktopPreloadBridge(options: {
     resolveAttachmentMedia: (url: string) => edge("resolveAttachmentMedia", { source: url }),
     readAttachmentText: (path: string) => edge("readAttachmentText", { path }),
     readAttachmentBytes: (path: string, maxBytes: number) => edge("readAttachmentBytes", { path, maxBytes }),
-    downloadAttachment: (path: string, suggestedName?: string) => edge("downloadAttachment", { path, suggestedName }),
+    downloadAttachment: (pathOrRequest: unknown, suggestedName?: string) => {
+      const record = typeof pathOrRequest === "object" && pathOrRequest != null && !Array.isArray(pathOrRequest)
+        ? pathOrRequest as Record<string, unknown>
+        : null;
+      const path = record != null && "path" in record ? record.path : pathOrRequest;
+      const name = record != null && "suggestedName" in record ? record.suggestedName : suggestedName;
+      return edge("downloadAttachment", { path, suggestedName: name });
+    },
     getLinkMetadata: (url: string) => edge("getLinkMetadata", { url }),
     async openExternal(url: string) { await edge("openExternal", { url }); },
     async openCloudAgent(bcId: string) { await edge("openCloudAgent", { bcId }); },
-    stageAttachmentBytes: (filename: string, bytes: Uint8Array) => edge("stageAttachmentBytes", { filename, bytes }),
-    commitStagedAttachments: (paths: readonly string[], filenames: readonly string[]) => edge("commitStagedAttachments", { paths, filenames }),
-    async discardStagedAttachment(path: string) { await edge("discardStagedAttachment", { path }); },
+    pickComposerFilePayloads: async () => {
+      try {
+        const picked = await edge("pickComposerFiles");
+        logAttach("pick", { count: Array.isArray(picked) ? picked.length : -1 });
+        return picked;
+      } catch (error) {
+        logAttach("pick-error", { error: String(error) });
+        throw error;
+      }
+    },
+    stageAttachmentBytes: async (filenameOrRequest: unknown, bytes?: unknown) => {
+      const request = normalizeStageAttachmentRequest(filenameOrRequest, bytes);
+      const payload = coerceAttachmentBytes(request.bytes);
+      logAttach("stage", {
+        filename: request.filename,
+        payloadBytes: payload == null ? null : payload.byteLength,
+        bytesType: request.bytes == null ? "null" : typeof request.bytes,
+      });
+      if (!isSafeAttachmentFilename(request.filename) || payload == null || payload.byteLength === 0) {
+        return { ok: false as const, reason: payload?.byteLength === 0 ? "empty" as const : "failed" as const };
+      }
+      const local = stageAttachmentLocally(request.filename, payload);
+      logAttach("stage-local", { filename: request.filename, path: local.path, bytes: payload.byteLength });
+      return local;
+    },
+    commitStagedAttachments: (pathsOrRequest: unknown, filenames?: unknown) => edge("commitStagedAttachments", normalizeCommitStagedRequest(pathsOrRequest, filenames)),
+    async discardStagedAttachment(pathOrRequest: unknown) { await edge("discardStagedAttachment", { path: normalizePathRequest(pathOrRequest) }); },
     mcp: {
       list: () => ipc.invoke("sand:mcp-list"),
       effectivePlugins: () => ipc.invoke("sand:mcp-effective-plugins"),
@@ -310,6 +375,11 @@ export function installPrimaryPreload(options: {
   const desktop = createDesktopPreloadBridge({ ...options, env, devRestartEnabled, initialState });
   options.contextBridge.exposeInMainWorld("desktop", desktop);
   options.contextBridge.exposeInMainWorld("coordinatorPort", broker.bridge);
+  if (typeof document !== "undefined") {
+    const inject = (): void => installMotion024Overlay(document);
+    if (document.documentElement != null) inject();
+    else document.addEventListener("DOMContentLoaded", inject, { once: true });
+  }
   options.ipc.on("sand:coordinator-port", (event: { readonly ports: readonly any[] }) => {
     const port = event.ports[0];
     if (port != null) broker.deliver(wrapTransferredCoordinatorPort(port));

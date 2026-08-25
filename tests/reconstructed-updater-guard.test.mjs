@@ -19,6 +19,7 @@ test("reconstructed fallback and clean packaging share one idempotent service gu
   assert.match(guarded, /SAND_DISABLE_UPDATES \?\?= "1"/);
   assert.match(guarded, /SAND_DISABLE_SENTRY \?\?= "1"/);
   assert.match(guarded, /SAND_DISABLE_TELEMETRY \?\?= "1"/);
+  assert.doesNotMatch(guarded, /SAND_USER_DATA_DIR/);
 
   const fallbackFixture = [
     "var isSandLabBuild2 = appPackageJson.sandLab === true;",

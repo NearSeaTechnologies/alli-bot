@@ -1,7 +1,10 @@
+import { join } from "node:path";
 import { hostname } from "node:os";
 import { pathToFileURL } from "node:url";
 
 import { createRealExpiryPolicy, createRealPollingPolicy, createRealRetryPolicy, realClock } from "../internal/scheduling.js";
+import { rendererTransportState } from "../shared/inference-router.js";
+import { SandSettingsStore } from "../shared/node/settings/sand-settings-store.js";
 import { COORDINATOR_TRANSPORT_STATE_FAMILY } from "../shared/rpc/coordinator-port.js";
 import { isCoordinatorMainMethod } from "../shared/rpc/coordinator-main.js";
 import { SAND_WEBAUTHN_HEARTBEAT_INTERVAL_MS, type WebAuthnCeremony } from "../shared/webauthn-gateway.js";
@@ -19,12 +22,16 @@ import { createTransportStageRecorder } from "./telemetry/transport-stage-record
 import { createWebAuthnProvider } from "./webauthn/provider.js";
 import { createSpawnedWebAuthnSigner, resolveWebAuthnSignerPath } from "./webauthn/signer.js";
 import { ClientSideToolV2Relay } from "./client-side-tool-v2-relay.js";
-import { createCoordinatorInferenceRouter } from "./inference-router.js";
+import { createCoordinatorInferenceRouter, createLocalInferenceAgent, LOCAL_INFERENCE_AGENT_ID, mergeLocalInferenceAgents, mergeLocalInferenceRosterEvent } from "./inference-router.js";
 
 export interface McpOAuthPending {
   readonly serverName: string;
   readonly redirectUrl: string;
   readonly state: string;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 export function asMcpOAuthPending(payload: unknown): McpOAuthPending | null {
@@ -71,6 +78,8 @@ export async function composeCoordinator(dependencies: ComposeCoordinatorDepende
   }
   const carrier = carrierIntake.carrier;
   const bootstrap = carrier.bootstrap;
+  const settings = new SandSettingsStore(join(bootstrap.processConfig.dataDir, "settings.json"));
+  const postedTransportState = () => rendererTransportState(settings.getInferenceProvider(), isGatewayStreamLive);
   const controlClient = createControlPortClient({ post: (frame) => carrier.control.post(frame), close: () => carrier.control.close() });
   const commands = controlClient.commands;
   const recorder = createTransportStageRecorder({
@@ -110,18 +119,24 @@ export async function composeCoordinator(dependencies: ComposeCoordinatorDepende
       toolRelay.accept(event.payload);
       return;
     }
-    if (event.channel === "agents") controlClient.postEvent("agents-event", { kind: "agents", event: event.payload });
-    if (event.channel === "agent-upserted") controlClient.postEvent("agents-event", { kind: "agent-upserted", event: event.payload });
+    if (event.channel === "agents" || event.channel === "agent-upserted") {
+      const payload = mergeLocalInferenceRosterEvent(event.payload);
+      controlClient.postEvent("agents-event", { kind: event.channel, event: payload });
+      const family = coordinatorEventFamilyForSseChannel(event.channel);
+      if (family != null) server.postEvent(family, payload);
+      return;
+    }
     const family = coordinatorEventFamilyForSseChannel(event.channel);
     if (family != null) server.postEvent(family, event.payload);
   }
 
   async function seedAgentsRosterToMain(): Promise<void> {
     try {
-      const agents = await gatewayClient.dispatchCommand("listAgents", {});
+      const agents = mergeLocalInferenceAgents(asArray(await gatewayClient.dispatchCommand("listAgents", {})));
       controlClient.postEvent("agents-roster-seed", { agents });
     } catch (error) {
-      process.stderr.write(`node-agent-coordinator: agents roster seed skipped: ${String(error)}\n`);
+      process.stderr.write(`node-agent-coordinator: agents roster seed using local Alli agent: ${String(error)}\n`);
+      controlClient.postEvent("agents-roster-seed", { agents: [createLocalInferenceAgent()] });
     }
   }
 
@@ -132,13 +147,18 @@ export async function composeCoordinator(dependencies: ComposeCoordinatorDepende
     if (event.family === "transport-down") {
       isGatewayStreamLive = false;
       hostSupervisor.invalidateHealthCache();
-      server.postEvent(COORDINATOR_TRANSPORT_STATE_FAMILY, { state: "down" });
+      const state = postedTransportState();
+      server.postEvent(COORDINATOR_TRANSPORT_STATE_FAMILY, { state });
+      if (state === "connected") {
+        const agents = [createLocalInferenceAgent()];
+        server.postEvent("agents", { activeAgentId: LOCAL_INFERENCE_AGENT_ID, agents });
+      }
       return;
     }
     isGatewayStreamLive = true;
     void localExecSupervisor.refreshConnection();
     void seedAgentsRosterToMain();
-    server.postEvent(COORDINATOR_TRANSPORT_STATE_FAMILY, { state: "connected" });
+    server.postEvent(COORDINATOR_TRANSPORT_STATE_FAMILY, { state: postedTransportState() });
   }
 
   const gatewayClient = new CoordinatorGatewayClient({
@@ -230,7 +250,16 @@ export async function composeCoordinator(dependencies: ComposeCoordinatorDepende
   };
   server = createRendererPortServer(
     { post: (frame) => carrier.data.post(frame), close: () => carrier.data.close() },
-    { dispatchRequest, onServing: () => { toolRelay.replay(); if (!isGatewayStreamLive) server.postEvent(COORDINATOR_TRANSPORT_STATE_FAMILY, { state: "down" }); } }
+    { dispatchRequest, onServing: () => {
+      toolRelay.replay();
+      const state = postedTransportState();
+      server.postEvent(COORDINATOR_TRANSPORT_STATE_FAMILY, { state });
+      if (!isGatewayStreamLive) {
+        const agents = [createLocalInferenceAgent()];
+        server.postEvent("agents", { activeAgentId: LOCAL_INFERENCE_AGENT_ID, agents });
+        controlClient.postEvent("agents-roster-seed", { agents });
+      }
+    } }
   );
   const mainDispatch = createGatewayRequestDispatch(gatewayClient, isCoordinatorMainMethod);
   const applyPause = (paused: boolean) => {

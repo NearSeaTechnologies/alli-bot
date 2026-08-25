@@ -31,9 +31,9 @@ interface CommandResult { readonly ok: boolean; readonly output: string }
 interface InferenceCredential { readonly accessToken: string; readonly backendUrl: string; readonly expiresAtMs: number }
 interface LocalHostBundle { readonly path: string; readonly sha256: string; readonly boxExecDaemonPath: string; readonly boxExecDaemonSha256: string }
 
-function runDocker(args: readonly string[]): Promise<CommandResult> {
+function runCommand(command: string, args: readonly string[]): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn("docker", [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const append = (chunk: Buffer): void => { output += chunk.toString(); if (output.length > 200_000) output = output.slice(-200_000); };
     child.stdout?.on("data", append);
@@ -41,6 +41,66 @@ function runDocker(args: readonly string[]): Promise<CommandResult> {
     child.once("error", (error) => resolve({ ok: false, output: `${output}\n${error.message}`.trim() }));
     child.once("close", (code) => resolve({ ok: code === 0, output: output.trim() }));
   });
+}
+
+function runDocker(args: readonly string[]): Promise<CommandResult> {
+  return runCommand("docker", args);
+}
+
+export async function readSandboxSshTarget(home = homedir()): Promise<{ host: string; key: string }> {
+  const key = process.env.ALLI_SANDBOX_SSH_KEY?.trim() || join(home, ".ssh", "id_ed25519");
+  let host = process.env.ALLI_SANDBOX_SSH?.trim() || "";
+  if (host.length === 0) {
+    try {
+      const envFile = await readFile(join(home, "Library", "Application Support", "Alli Bot", "host.env"), "utf8");
+      for (const line of envFile.split(/\r?\n/)) {
+        const match = /^ALLI_SANDBOX_SSH_FALLBACK=(.*)$/.exec(line.trim());
+        if (match) host = match[1]!.trim();
+      }
+    } catch {}
+  }
+  if (host.length === 0) host = "root@46.224.83.5";
+  return { host, key };
+}
+
+export async function runSandboxSsh(remoteCommand: string): Promise<CommandResult> {
+  const { host, key } = await readSandboxSshTarget();
+  const args = ["-4", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=20", "-o", "StrictHostKeyChecking=accept-new"];
+  try {
+    await stat(key);
+    args.push("-i", key);
+  } catch {}
+  args.push(host, remoteCommand);
+  return await runCommand("ssh", args);
+}
+
+async function waitSandboxGateway(settingsPath: string, timeoutMs = READY_TIMEOUT_MS): Promise<GatewayConnection> {
+  const token = await readOrCreateToken(settingsPath);
+  const baseUrl = sandboxGatewayUrl();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await gatewayReady(token, baseUrl)) return { baseUrl, token };
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`Sandbox computer did not come back at ${baseUrl} after an update.`);
+}
+
+export async function updateSandboxBox(settingsPath: string): Promise<RecreateResult> {
+  const updated = await runSandboxSsh(
+    `docker pull ${LOCAL_DOCKER_BOX_IMAGE}; docker rm -f ${LOCAL_DOCKER_BOX_CONTAINER} >/dev/null 2>&1 || true; bash /opt/alli-bot/install.sh`,
+  );
+  if (!updated.ok) return { status: "rejected", reason: updated.output || "Could not update the GrokBot computer over SSH." };
+  await waitSandboxGateway(settingsPath);
+  return { status: "started-untrackable" };
+}
+
+export async function resetSandboxBox(settingsPath: string): Promise<RecreateResult> {
+  const reset = await runSandboxSsh(
+    `docker rm -f ${LOCAL_DOCKER_BOX_CONTAINER} >/dev/null 2>&1 || true; docker volume rm grok-bot-local-vm-workspace grok-bot-local-vm-data >/dev/null 2>&1 || true; bash /opt/alli-bot/install.sh`,
+  );
+  if (!reset.ok) return { status: "rejected", reason: reset.output || "Could not reset the GrokBot computer over SSH." };
+  await waitSandboxGateway(settingsPath);
+  return { status: "started-untrackable" };
 }
 
 function credentialPath(settingsPath: string): string {
@@ -74,9 +134,14 @@ async function readOrCreateToken(settingsPath: string): Promise<string> {
   return token;
 }
 
-async function gatewayReady(token: string): Promise<boolean> {
+export function sandboxGatewayUrl(): string {
+  const configured = process.env.SAND_BOX_GATEWAY_URL?.trim();
+  return configured && configured.length > 0 ? configured.replace(/\/+$/, "") : LOCAL_DOCKER_GATEWAY_URL;
+}
+
+async function gatewayReady(token: string, baseUrl = sandboxGatewayUrl()): Promise<boolean> {
   try {
-    const response = await fetch(`${LOCAL_DOCKER_GATEWAY_URL}/health`, {
+    const response = await fetch(`${baseUrl}/health`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(2_000),
     });
@@ -106,7 +171,7 @@ export async function getLocalDockerStatus(settingsPath: string): Promise<LocalD
   if (!daemon.ok) return { available: false, running: false, ready: false, containerName: LOCAL_DOCKER_BOX_CONTAINER, image: LOCAL_DOCKER_BOX_IMAGE, detail: daemon.output || "Docker is not running." };
   const inspected = await inspectContainer();
   if (!inspected.exists) return { available: true, running: false, ready: false, containerName: LOCAL_DOCKER_BOX_CONTAINER, image: LOCAL_DOCKER_BOX_IMAGE, detail: "Ready to create the local VM." };
-  if (!inspected.owned) return { available: true, running: inspected.running, ready: false, containerName: LOCAL_DOCKER_BOX_CONTAINER, image: inspected.image, detail: `Container ${LOCAL_DOCKER_BOX_CONTAINER} exists but is not owned by Grok Bot.` };
+  if (!inspected.owned) return { available: true, running: inspected.running, ready: false, containerName: LOCAL_DOCKER_BOX_CONTAINER, image: inspected.image, detail: `Container ${LOCAL_DOCKER_BOX_CONTAINER} exists but is not owned by Alli Bot.` };
   const ready = inspected.running && await gatewayReady(await readOrCreateToken(settingsPath));
   return { available: true, running: inspected.running, ready, containerName: LOCAL_DOCKER_BOX_CONTAINER, image: inspected.image, detail: ready ? "Local Docker VM is ready." : inspected.running ? "Container is starting." : "Local Docker VM is stopped." };
 }
@@ -219,6 +284,30 @@ export async function startLocalDockerBox(settingsPath: string): Promise<Gateway
   return await ensureLocalDockerBox(settingsPath);
 }
 
+export async function connectSandboxBox(settingsPath: string): Promise<GatewayConnection> {
+  const token = await readOrCreateToken(settingsPath);
+  const baseUrl = sandboxGatewayUrl();
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await gatewayReady(token, baseUrl)) return { baseUrl, token };
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`Sandbox computer is not reachable at ${baseUrl}. Load the Alli sandbox launchd tunnel (npm run sandbox:tunnel:install) and make sure the GrokBot container is running.`);
+}
+
+export async function getSandboxStatus(settingsPath: string): Promise<LocalDockerStatus> {
+  const token = await readOrCreateToken(settingsPath);
+  const ready = await gatewayReady(token);
+  return {
+    available: true,
+    running: ready,
+    ready,
+    containerName: LOCAL_DOCKER_BOX_CONTAINER,
+    image: LOCAL_DOCKER_BOX_IMAGE,
+    detail: ready ? "Sandbox computer is ready." : "Waiting for the sandbox tunnel on localhost:1340.",
+  };
+}
+
 export async function stopLocalDockerBox(): Promise<void> {
   const inspected = await inspectContainer();
   if (!inspected.exists || !inspected.running) return;
@@ -242,10 +331,19 @@ export function createSettingsRoutedHostConnector(
     return ensureInFlight;
   };
   return {
-    connect: async () => settings.getBoxRuntime() === "local-docker" ? await localConnect() : await remote.connect(),
+    connect: async () => {
+      const mode = settings.getBoxRuntime();
+      if (mode === "sandbox") {
+        await stopLocalDockerBox();
+        return await connectSandboxBox(settings.settingsPath);
+      }
+      if (mode === "local-docker") return await localConnect();
+      return await remote.connect();
+    },
     ...(remote.issueLocalExecDaemonCredential == null ? {} : { issueLocalExecDaemonCredential: remote.issueLocalExecDaemonCredential.bind(remote) }),
     ...(remote.issueInferenceCredential == null ? {} : { issueInferenceCredential: remote.issueInferenceCredential.bind(remote) }),
     recreate: async (args): Promise<RecreateResult> => {
+      if (settings.getBoxRuntime() === "sandbox") return await updateSandboxBox(settings.settingsPath);
       if (settings.getBoxRuntime() !== "local-docker") {
         if (remote.recreate == null) throw new Error("Remote computer recreation is unavailable.");
         return await remote.recreate(args);
@@ -256,6 +354,7 @@ export function createSettingsRoutedHostConnector(
       return { status: "started-untrackable" };
     },
     forceRecreate: async (): Promise<RecreateResult> => {
+      if (settings.getBoxRuntime() === "sandbox") return await resetSandboxBox(settings.settingsPath);
       if (settings.getBoxRuntime() !== "local-docker") {
         if (remote.forceRecreate == null) return { status: "rejected", reason: "Remote computer reset is unavailable." };
         return await remote.forceRecreate();

@@ -26,6 +26,7 @@ export interface ElectronAttachmentGatewayCompositionPorts {
   readonly BrowserWindow: new(options: { readonly show: false }) => unknown;
   readonly dialog: {
     showSaveDialog(window: unknown, options: { readonly defaultPath: string }): Promise<{ readonly canceled: boolean; readonly filePath?: string }>;
+    showOpenDialog(window: unknown, options: { readonly properties: readonly string[] }): Promise<{ readonly canceled: boolean; readonly filePaths: readonly string[] }>;
     showMessageBox(windowOrOptions: unknown, options?: { readonly type: "error"; readonly title: string; readonly message: string }): Promise<unknown>;
   };
   readonly nativeImage: AttachmentEdgeDeps["nativeImage"] & {
@@ -39,7 +40,7 @@ const REQUIRED_FUNCTIONS = [
   "fetchLinkMetadata", "boundPreviewImage", "previewKindNeedsBytes",
   "getFilePreviewKind", "byteLimitForName", "getStagingDir",
   "isWithinStagingDir", "resolveSuggestedDownloadName",
-  "resolveDefaultDownloadPath", "showSaveDialog", "createHiddenWindow",
+  "resolveDefaultDownloadPath", "showSaveDialog", "showOpenDialog", "createHiddenWindow",
   "showErrorMessage", "getUserDataDir",
 ] as const;
 
@@ -81,6 +82,7 @@ export function createProductionAttachmentGatewayBinding(
     throw new TypeError("Missing Electron production adapter port: attachmentGateway.electron.BrowserWindow.");
   }
   requireFunction(electron?.dialog?.showSaveDialog, "attachmentGateway.electron.dialog.showSaveDialog");
+  requireFunction(electron?.dialog?.showOpenDialog, "attachmentGateway.electron.dialog.showOpenDialog");
   requireFunction(electron?.dialog?.showMessageBox, "attachmentGateway.electron.dialog.showMessageBox");
   requireFunction(electron?.nativeImage?.createFromBuffer, "attachmentGateway.electron.nativeImage.createFromBuffer");
   requireFunction(electron?.nativeImage?.createFromDataURL, "attachmentGateway.electron.nativeImage.createFromDataURL");
@@ -124,6 +126,9 @@ export function createProductionAttachmentGatewayBinding(
         resolveSuggestedDownloadName,
         resolveDefaultDownloadPath,
         showSaveDialog: (window, options) => electron.dialog.showSaveDialog(window, options),
+        showOpenDialog: (window, options) => window == null
+          ? electron.dialog.showOpenDialog(options)
+          : electron.dialog.showOpenDialog(window, options),
         createHiddenWindow: (options) => new electron.BrowserWindow(options),
         showErrorMessage: async (window, options) => {
           if (window == null) await electron.dialog.showMessageBox(options);
