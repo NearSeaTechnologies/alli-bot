@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SandSettingsStore } from "../../shared/node/settings/sand-settings-store.js";
+import { LOCAL_DOCKER_KEEP_ALIVE_MS, SANDBOX_COMPUTER_KEEP_AWAKE_COMMAND } from "../../shared/sandbox-computer-always-on.js";
 import type { RecreateResult } from "./box-recreate-commands.js";
 import type { SandRemoteHostConnector } from "./box-host-connector.js";
 import type { GatewayConnection } from "./gateway-descriptor-cache.js";
@@ -14,7 +15,7 @@ export const LOCAL_DOCKER_BOX_IMAGE = "public.ecr.aws/k0i0n2g5/cursorenvironment
 export const LOCAL_DOCKER_BOX_CONTAINER = "grok-bot-local-vm";
 export const LOCAL_DOCKER_GATEWAY_URL = "http://127.0.0.1:1340";
 export const LOCAL_DOCKER_OWNER_LABEL = "com.grok-bot.local-vm=1";
-export const LOCAL_DOCKER_SCHEMA_VERSION = "6";
+export const LOCAL_DOCKER_SCHEMA_VERSION = "7";
 const READY_TIMEOUT_MS = 180_000;
 const OPTIONAL_CREDENTIAL_TIMEOUT_MS = 3_000;
 
@@ -253,7 +254,7 @@ async function ensureLocalDockerBox(settingsPath: string, inferenceCredential?: 
       "--label", `com.grok-bot.local-vm.box-exec-daemon-sha256=${hostBundle.boxExecDaemonSha256}`,
       "--label", `com.grok-bot.local-vm.inference-credential=${inferenceCredential == null ? "0" : "1"}`,
       "--label", `com.grok-bot.local-vm.schema-version=${LOCAL_DOCKER_SCHEMA_VERSION}`,
-      "--platform", "linux/amd64", "--restart", "unless-stopped",
+      "--platform", "linux/amd64", "--restart", "always",
       "--env", "SAND_SUPERVISOR_ENABLED=1", "--env", "SAND_BOX_AUTO_UPDATE=0", "--env", "SAND_USE_EXISTING_BOX_EXEC_DAEMON=1", "--env", "SAND_TREE_SITTER_NODE_DEPS=/home/box/deps", "--env", "NODE_PATH=/home/box/deps", "--env", "SAND_GATEWAY_BIND_HOST=0.0.0.0", "--env", "SAND_HOST_PORT=1340", "--env", `SAND_GATEWAY_TOKEN=${token}`,
       ...(inferenceCredential == null ? [] : ["--env", "SAND_DEV_INFERENCE_TOKEN_FILE=/run/grok-bot/inference.json", "--env", `SAND_BACKEND_URL=${inferenceCredential.backendUrl}`]),
       "--publish", "127.0.0.1:1337:1337", "--publish", "127.0.0.1:1339:1339", "--publish", "127.0.0.1:1340:1340",
@@ -269,7 +270,11 @@ async function ensureLocalDockerBox(settingsPath: string, inferenceCredential?: 
   }
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await gatewayReady(token)) return { baseUrl: LOCAL_DOCKER_GATEWAY_URL, token };
+    if (await gatewayReady(token)) {
+      startLocalDockerKeepAlive();
+      void applySandboxComputerKeepAwake();
+      return { baseUrl: LOCAL_DOCKER_GATEWAY_URL, token };
+    }
     const state = await inspectContainer();
     if (!state.running) {
       const logs = await runDocker(["logs", "--tail", "80", LOCAL_DOCKER_BOX_CONTAINER]);
@@ -278,6 +283,33 @@ async function ensureLocalDockerBox(settingsPath: string, inferenceCredential?: 
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
   throw new Error("Local Docker VM did not expose its gateway within three minutes.");
+}
+
+async function applySandboxComputerKeepAwake(): Promise<void> {
+  await runDocker(["exec", LOCAL_DOCKER_BOX_CONTAINER, "sh", "-c", SANDBOX_COMPUTER_KEEP_AWAKE_COMMAND]);
+}
+
+let keepAliveTimer: ReturnType<typeof setInterval> | undefined;
+
+export function stopLocalDockerKeepAlive(): void {
+  if (keepAliveTimer == null) return;
+  clearInterval(keepAliveTimer);
+  keepAliveTimer = undefined;
+}
+
+export function startLocalDockerKeepAlive(): void {
+  stopLocalDockerKeepAlive();
+  keepAliveTimer = setInterval(() => {
+    void (async () => {
+      const inspected = await inspectContainer();
+      if (!inspected.exists || !inspected.owned) return;
+      if (!inspected.running) {
+        await runDocker(["start", LOCAL_DOCKER_BOX_CONTAINER]);
+      }
+      await applySandboxComputerKeepAwake();
+    })();
+  }, LOCAL_DOCKER_KEEP_ALIVE_MS);
+  keepAliveTimer.unref?.();
 }
 
 export async function startLocalDockerBox(settingsPath: string): Promise<GatewayConnection> {
@@ -309,6 +341,7 @@ export async function getSandboxStatus(settingsPath: string): Promise<LocalDocke
 }
 
 export async function stopLocalDockerBox(): Promise<void> {
+  stopLocalDockerKeepAlive();
   const inspected = await inspectContainer();
   if (!inspected.exists || !inspected.running) return;
   if (!inspected.owned) throw new Error(`Refusing to stop unowned container ${LOCAL_DOCKER_BOX_CONTAINER}.`);
