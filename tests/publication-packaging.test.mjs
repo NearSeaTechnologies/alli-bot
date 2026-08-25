@@ -173,6 +173,7 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(providers, /parameters: jsonSchema\(parameters\)/);
   assert.match(providers, /You are \$\{SAND_PRODUCT_DISPLAY_NAME\}, a warm, concise desktop assistant/);
   assert.match(providers, /ask which email or account before calling its tools/);
+  assert.match(providers, /call AskQuestion so it renders as a question card/);
   assert.match(providers, /mcpServers: \{ grok_bot_plugins:/);
   assert.match(providers, /recordRoutedUsage\(provider, usage\)/);
   assert.match(providers, /queryClaude/);
@@ -182,6 +183,10 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(coordinator, /resolveLocalToolPermission/);
   assert.match(coordinator, /resolveAutoReviewApproval/);
   assert.match(coordinator, /auto-review-approval/);
+  assert.match(coordinator, /ASK_QUESTION_TOOL_NAME = "AskQuestion"/);
+  assert.match(coordinator, /PROMPT_CONNECTORS_TOOL_NAME = "PromptConnectors"/);
+  assert.match(coordinator, /sandWidgetSchema\.safeParse/);
+  assert.match(coordinator, /dismissOnMoveOn/);
   assert.doesNotMatch(coordinator, /Add another \$\{/);
   assert.match(providers, /https:\/\/openrouter\.ai\/api\/v1/);
   assert.match(providers, /OpenRouter needs OPENROUTER_API_KEY/);
