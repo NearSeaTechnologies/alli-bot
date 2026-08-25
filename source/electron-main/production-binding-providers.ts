@@ -247,6 +247,7 @@ export function createProductionSettingsBinding(
       if (created) throw new Error("Electron production settings service was created more than once.");
       created = true;
       const settingsStore = new SandSettingsStore(join(resolveRoot(), "settings.json"));
+      settingsStore.migrateLegacyRemoteBoxRuntime();
       let themeController: SandThemeController | undefined;
       let disposed = false;
       const requireThemeController = (): SandThemeController => {

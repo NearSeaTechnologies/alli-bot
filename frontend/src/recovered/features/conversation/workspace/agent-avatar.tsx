@@ -39,25 +39,17 @@ export interface AgentAvatarProps {
 const SIZE_PX: Record<AgentAvatarSize, number> = { xs: 16, sm: 22, md: 28, lg: 36, xl: 72 };
 
 const ACTIVITY_TO_STATE: Record<string, PersonaState> = {
-  thinking: "thinking", searching: "searching", browsing: "searching", reading: "searching", connecting: "searching",
-  writing: "working", coding: "working", generating: "loading", "running-commands": "working", "on-its-computer": "working",
-  "on-your-computer": "working", working: "working", messaging: "orbit", waiting: "orbit", sending: "sending"
+  thinking: "idle", searching: "idle", browsing: "idle", reading: "idle", connecting: "idle",
+  writing: "idle", coding: "idle", generating: "idle", "running-commands": "idle", "on-its-computer": "idle",
+  "on-your-computer": "idle", working: "idle", messaging: "idle", waiting: "idle", sending: "idle"
 };
 
 function activityState(activity: unknown): PersonaState | null {
   if (typeof activity !== "object" || activity == null) return null;
   const value = activity as Record<string, unknown>;
-  if (value.kind === "thinking") return "thinking";
-  if (value.kind === "tool" && value.tool === "SendToAgent") return "sending";
+  if (value.kind === "thinking") return "idle";
   if (typeof value.verb === "string" && ACTIVITY_TO_STATE[value.verb] != null) return ACTIVITY_TO_STATE[value.verb];
-  if (typeof value.tool === "string") {
-    if (value.tool === "WebSearch") return "searching";
-    if (value.tool === "WebFetch" || value.tool.startsWith("browser_")) return "searching";
-    if (value.tool === "GenerateImage") return "loading";
-    if (value.tool === "SendToAgent" || value.tool === "UpdateAgent") return "sending";
-    if (value.tool === "Task" || value.tool === "Await" || value.tool === "CheckSubagent") return "orbit";
-    return "working";
-  }
+  if (typeof value.tool === "string") return "idle";
   return null;
 }
 
@@ -66,8 +58,7 @@ export function personaStateFromAgent(input: Pick<AgentAvatarProps, "awaitingUse
   if (input.awaitingUserResponse != null) return "idle";
   const activity = activityState(input.currentActivity);
   if (activity != null) return activity;
-  if (input.isComposingMessage === true) return "thinking";
-  return input.isRunning === true ? "working" : "idle";
+  return "idle";
 }
 
 function avatarState(props: AgentAvatarProps): PersonaState {

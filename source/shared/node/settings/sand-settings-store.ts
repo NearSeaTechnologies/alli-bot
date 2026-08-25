@@ -114,6 +114,14 @@ export class SandSettingsStore {
   setThemePreference(value: SandThemePreference): void { this.update((s) => ({ ...s, themePreference: value })); }
   getBoxRuntime(): SandBoxRuntime { return this.load().boxRuntime ?? DEFAULT_SAND_BOX_RUNTIME; }
   setBoxRuntime(value: SandBoxRuntime): void { this.update((s) => ({ ...s, boxRuntime: value })); }
+  migrateLegacyRemoteBoxRuntime(): void {
+    if (!existsSync(this.settingsPath)) return;
+    try {
+      const raw = JSON.parse(readFileSync(this.settingsPath, "utf8")) as { boxRuntime?: unknown };
+      if (raw.boxRuntime !== "remote") return;
+      this.setBoxRuntime("sandbox");
+    } catch {}
+  }
   getEgressTunnelEnabled(): boolean { return this.load().egressTunnelEnabled; }
   setEgressTunnelEnabled(value: boolean): void { this.update((s) => ({ ...s, egressTunnelEnabled: value })); }
   getWebauthnProxyEnabled(): boolean { return this.load().webauthnProxyEnabled; }

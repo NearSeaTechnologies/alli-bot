@@ -7,4 +7,6 @@ export const SYSTEM_TOOLS = Object.freeze({
   hdiutil: "/usr/bin/hdiutil",
   plutil: "/usr/bin/plutil",
   xattr: "/usr/bin/xattr",
+  sips: "/usr/bin/sips",
+  iconutil: "/usr/bin/iconutil",
 });

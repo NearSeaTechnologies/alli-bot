@@ -1,6 +1,8 @@
-import { rename, stat } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { repoRoot } from "./config.mjs";
 import { run } from "./process.mjs";
 import { SYSTEM_TOOLS } from "./system-tools.mjs";
 
@@ -35,6 +37,35 @@ async function replacePlistString(plist, key, value) {
   await run(SYSTEM_TOOLS.plutil, ["-replace", key, "-string", value, plist]);
 }
 
+export const ALLI_BOT_ICON_SOURCE = path.join(repoRoot, "brand", "alli-bot-icon-1024.png");
+
+const ICONSET_SIZES = [
+  ["icon_16x16.png", 16],
+  ["icon_16x16@2x.png", 32],
+  ["icon_32x32.png", 32],
+  ["icon_32x32@2x.png", 64],
+  ["icon_128x128.png", 128],
+  ["icon_128x128@2x.png", 256],
+  ["icon_256x256.png", 256],
+  ["icon_256x256@2x.png", 512],
+  ["icon_512x512.png", 512],
+  ["icon_512x512@2x.png", 1024],
+];
+
+export async function generateAlliBotIcns(icnsPath) {
+  const staging = await mkdtemp(path.join(tmpdir(), "alli-bot-icon-"));
+  const iconset = path.join(staging, "alli-bot.iconset");
+  try {
+    await mkdir(iconset, { recursive: true });
+    for (const [name, size] of ICONSET_SIZES) {
+      await run(SYSTEM_TOOLS.sips, ["-z", String(size), String(size), ALLI_BOT_ICON_SOURCE, "--out", path.join(iconset, name)]);
+    }
+    await run(SYSTEM_TOOLS.iconutil, ["-c", "icns", iconset, "-o", icnsPath]);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
 export async function applyAlliBotMacIdentity(appPath) {
   if (typeof appPath !== "string" || appPath.trim() === "") {
     throw new TypeError("An application bundle path is required");
@@ -48,6 +79,13 @@ export async function applyAlliBotMacIdentity(appPath) {
   await replacePlistString(infoPlist, "CFBundleExecutable", TO);
   await replacePlistString(infoPlist, "CFBundleName", TO);
   await replacePlistString(infoPlist, "CFBundleDisplayName", TO);
+  const resources = path.join(contents, "Resources");
+  await mkdir(resources, { recursive: true });
+  const icnsPath = path.join(resources, `${TO}.icns`);
+  await generateAlliBotIcns(icnsPath);
+  const electronIcns = path.join(resources, "electron.icns");
+  if (await exists(electronIcns)) await cp(icnsPath, electronIcns);
+  await replacePlistString(infoPlist, "CFBundleIconFile", TO);
 
   for (const helper of HELPERS) {
     const fromApp = path.join(frameworks, helper.fromApp);

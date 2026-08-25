@@ -34,13 +34,33 @@ type UsageRecord = { inputTokens?: number; outputTokens?: number; cacheReadToken
 type RoutedToolExecutor = (tool: Loose, args: unknown, toolCallId: string) => Promise<unknown>;
 type RoutedCanUseTool = (toolName: string, input: Record<string, unknown>) => Promise<{ behavior: "allow" | "deny"; updatedInput?: Record<string, unknown>; message?: string }>;
 
-const GROK_ROUTER_SYSTEM_PROMPT = [
-  `You are ${SAND_PRODUCT_DISPLAY_NAME}, a warm, concise desktop assistant.`,
-  `You are running inside ${SAND_PRODUCT_DISPLAY_NAME}, not inside Codex CLI or Claude Code.`,
-  `The tools supplied with this request are ${SAND_PRODUCT_DISPLAY_NAME}'s already-connected plugins and accounts.`,
-  "If a plugin has more than one connected account, or the user did not name which email to use, ask which email or account before calling its tools. After they answer, use that account and include the address in the tool arguments when possible.",
-  "Do not ask the user to add or reconnect an account that is already connected. Never ask for an API key for an already-connected plugin.",
-].join("\n");
+function currentAgentIdentity(agentId?: string): { name: string; description: string } {
+  if (typeof agentId !== "string" || agentId.length === 0) return { name: "", description: "" };
+  try {
+    const profile = JSON.parse(readFileSync(join(getSandRootDir(), "agents", agentId, "profile.json"), "utf8")) as { name?: unknown; description?: unknown };
+    return {
+      name: typeof profile.name === "string" ? profile.name.trim() : "",
+      description: typeof profile.description === "string" ? profile.description.trim() : "",
+    };
+  } catch {
+    return { name: "", description: "" };
+  }
+}
+
+function grokRouterSystemPrompt(agentId?: string): string {
+  const { name, description } = currentAgentIdentity(agentId);
+  const generic = name.length === 0 || name === "Alli Bot" || name === SAND_PRODUCT_DISPLAY_NAME || name === "Grok" || name === "New Agent" || name === "New Bot";
+  const identity = generic
+    ? `You are ${SAND_PRODUCT_DISPLAY_NAME}, a warm, concise desktop assistant.`
+    : `You are ${name}, a distinct teammate inside ${SAND_PRODUCT_DISPLAY_NAME}. Never introduce yourself as Alli Bot or Grok Bot. If asked your name, say "${name}".${description.length > 0 ? ` Your role: ${description}` : ""}`;
+  return [
+    identity,
+    `You are running inside ${SAND_PRODUCT_DISPLAY_NAME} as this teammate, not inside Codex CLI or Claude Code.`,
+    `The tools supplied with this request are ${SAND_PRODUCT_DISPLAY_NAME}'s already-connected plugins and accounts.`,
+    "If a plugin has more than one connected account, or the user did not name which email to use, ask which email or account before calling its tools. After they answer, use that account and include the address in the tool arguments when possible.",
+    "Do not ask the user to add or reconnect an account that is already connected. Never ask for an API key for an already-connected plugin.",
+  ].join("\n");
+}
 
 function recordRoutedUsage(provider: RoutedProvider, usage: UsageRecord): void {
   new SandSettingsStore(join(getSandRootDir(), "settings.json")).recordInferenceUsage(provider, usage);
@@ -62,12 +82,12 @@ function openRouterCredential(): string {
   return value;
 }
 
-function providerPrompt(messages: readonly ProviderMessage[]): string {
+function providerPrompt(messages: readonly ProviderMessage[], agentId?: string): string {
   const rendered = messages.map(message => {
     const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
     return `${message.role.toUpperCase()}: ${content}`;
   }).join("\n\n");
-  return `${GROK_ROUTER_SYSTEM_PROMPT}\n\nContinue this Alli Bot conversation.\n\n${rendered}`;
+  return `${grokRouterSystemPrompt(agentId)}\n\nContinue this teammate's conversation.\n\n${rendered}`;
 }
 
 function deferred<T>() { return Promise.withResolvers<T>(); }
@@ -178,7 +198,7 @@ function codexTools(definitions: readonly Loose[] | undefined): CodexDirectTool[
   return tools.length === 0 ? undefined : tools;
 }
 
-function codexExecutor(messages: readonly ProviderMessage[], invocationId: string, definitions?: readonly Loose[], executeTool?: RoutedToolExecutor, onUsage?: (usage: UsageRecord) => void) {
+function codexExecutor(messages: readonly ProviderMessage[], invocationId: string, definitions?: readonly Loose[], executeTool?: RoutedToolExecutor, onUsage?: (usage: UsageRecord) => void, agentId?: string) {
   const credentials = codexCredentials();
   const usage = deferred<{ promptTokens: number; completionTokens: number; totalTokens: number }>();
   const extendedUsage = deferred<{ inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; maxTokens: number }>();
@@ -194,7 +214,7 @@ function codexExecutor(messages: readonly ProviderMessage[], invocationId: strin
         endpoint: "https://chatgpt.com/backend-api/codex/responses",
         model,
         ...(configuredCodexReasoningEffort() == null ? {} : { reasoningEffort: configuredCodexReasoningEffort()! }),
-        instructions: GROK_ROUTER_SYSTEM_PROMPT,
+        instructions: grokRouterSystemPrompt(agentId),
         input: messages.map(message => ({ role: message.role === "assistant" ? "assistant" : "user", content: typeof message.content === "string" ? message.content : JSON.stringify(message.content) })),
         ...(tools == null ? {} : { tools }),
         ...(executeTool == null ? {} : { executeTool: async (selected, args, toolCallId) => await executeTool(selected.source, args, toolCallId) }),
@@ -214,7 +234,7 @@ function codexExecutor(messages: readonly ProviderMessage[], invocationId: strin
   return { fullStream, response: resultResponse.promise, usage: usage.promise, extendedUsage: extendedUsage.promise, providerMetadata: metadata.promise, invocationId: Promise.resolve(invocationId) };
 }
 
-function claudeExecutor(messages: readonly ProviderMessage[], invocationId: string, onUsage?: (usage: UsageRecord) => void, mcpServerUrl?: string, canUseTool?: RoutedCanUseTool) {
+function claudeExecutor(messages: readonly ProviderMessage[], invocationId: string, onUsage?: (usage: UsageRecord) => void, mcpServerUrl?: string, canUseTool?: RoutedCanUseTool, agentId?: string) {
   const executable = resolveClaudeCodeCliPath();
   if (executable == null) throw new Error("Claude Code is not installed. Install and sign in to Claude Code, then reopen Alli Bot.");
   const usage = deferred<{ promptTokens: number; completionTokens: number; totalTokens: number }>();
@@ -226,7 +246,7 @@ function claudeExecutor(messages: readonly ProviderMessage[], invocationId: stri
       let final: SDKResultMessage | undefined;
       let streamed = "";
       const selectedModel = process.env.SAND_CLAUDE_MODEL?.trim();
-      for await (const message of queryClaude({ prompt: providerPrompt(messages), options: {
+      for await (const message of queryClaude({ prompt: providerPrompt(messages, agentId), options: {
         pathToClaudeCodeExecutable: executable,
         cwd: getSandRootDir(),
         tools: mcpServerUrl == null ? [] : ["mcp__grok_bot_plugins__*"],
@@ -288,17 +308,17 @@ function toToolSet(definitions: readonly Loose[] | undefined, executeTool?: Rout
   return Object.keys(tools).length === 0 ? undefined : tools;
 }
 
-function openRouterExecutor(messages: readonly ProviderMessage[], invocationId: string, definitions?: readonly Loose[], executeTool?: RoutedToolExecutor, onUsage?: (usage: UsageRecord) => void) {
+function openRouterExecutor(messages: readonly ProviderMessage[], invocationId: string, definitions?: readonly Loose[], executeTool?: RoutedToolExecutor, onUsage?: (usage: UsageRecord) => void, agentId?: string) {
   const id = process.env.SAND_OPENROUTER_MODEL?.trim() || "openai/gpt-5.2";
   const model: LanguageModelV1 = createOpenAI({ apiKey: openRouterCredential(), baseURL: "https://openrouter.ai/api/v1", compatibility: "compatible", name: "openrouter", headers: { "HTTP-Referer": "https://github.com/grok-bot-reconstructed", "X-Title": "Alli Bot Reconstructed" } }).chat(id as any);
   const tools = toToolSet(definitions, executeTool);
-  const result = streamText({ model, system: GROK_ROUTER_SYSTEM_PROMPT, messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : 8 });
+  const result = streamText({ model, system: grokRouterSystemPrompt(agentId), messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : 8 });
   const extendedUsage = result.usage.then(value => ({ inputTokens: value.promptTokens, outputTokens: value.completionTokens, cacheReadTokens: 0, cacheWriteTokens: 0, maxTokens: 0 }));
   if (onUsage != null) void extendedUsage.then(onUsage);
   return { fullStream: result.fullStream, response: result.response, usage: result.usage, extendedUsage, providerMetadata: result.providerMetadata, invocationId: Promise.resolve(invocationId) };
 }
 
-function grokExecutor(messages: readonly ProviderMessage[], invocationId: string, definitions?: readonly Loose[], executeTool?: RoutedToolExecutor, onUsage?: (usage: UsageRecord) => void) {
+function grokExecutor(messages: readonly ProviderMessage[], invocationId: string, definitions?: readonly Loose[], executeTool?: RoutedToolExecutor, onUsage?: (usage: UsageRecord) => void, agentId?: string) {
   const credentials = loadGrokCredentials();
   const id = configuredGrokModel();
   const model: LanguageModelV1 = createOpenAI({
@@ -310,25 +330,25 @@ function grokExecutor(messages: readonly ProviderMessage[], invocationId: string
     headers: { "HTTP-Referer": "https://github.com/pedrofspinho/grok-bot-0.18-reconstructed", "X-Title": SAND_PRODUCT_DISPLAY_NAME },
   }).chat(id as any);
   const tools = toToolSet(definitions, executeTool);
-  const result = streamText({ model, system: GROK_ROUTER_SYSTEM_PROMPT, messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : 8 });
+  const result = streamText({ model, system: grokRouterSystemPrompt(agentId), messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : 8 });
   const extendedUsage = result.usage.then(value => ({ inputTokens: value.promptTokens, outputTokens: value.completionTokens, cacheReadTokens: 0, cacheWriteTokens: 0, maxTokens: 0 }));
   if (onUsage != null) void extendedUsage.then(onUsage);
   return { fullStream: result.fullStream, response: result.response, usage: result.usage, extendedUsage, providerMetadata: result.providerMetadata, invocationId: Promise.resolve(invocationId) };
 }
 
 class ProviderPromptExecutor extends BasePromptExecutor<ProviderMessage> {
-  constructor(readonly provider: RoutedProvider, initialMessages?: readonly ProviderMessage[], readonly onUsage?: (usage: UsageRecord) => void) { super(new BasePromptBuilder(initialMessages)); }
+  constructor(readonly provider: RoutedProvider, initialMessages?: readonly ProviderMessage[], readonly onUsage?: (usage: UsageRecord) => void, readonly agentId?: string) { super(new BasePromptBuilder(initialMessages)); }
   stream(_ctx: unknown, invocationId = crypto.randomUUID(), definitions?: readonly Loose[]) {
-    if (this.provider === "codex") return codexExecutor(this.getMessages(), invocationId, definitions, undefined, this.onUsage);
-    if (this.provider === "claude-code") return claudeExecutor(this.getMessages(), invocationId, this.onUsage);
-    if (this.provider === "grok") return grokExecutor(this.getMessages(), invocationId, definitions, undefined, this.onUsage);
-    return openRouterExecutor(this.getMessages(), invocationId, definitions, undefined, this.onUsage);
+    if (this.provider === "codex") return codexExecutor(this.getMessages(), invocationId, definitions, undefined, this.onUsage, this.agentId);
+    if (this.provider === "claude-code") return claudeExecutor(this.getMessages(), invocationId, this.onUsage, undefined, undefined, this.agentId);
+    if (this.provider === "grok") return grokExecutor(this.getMessages(), invocationId, definitions, undefined, this.onUsage, this.agentId);
+    return openRouterExecutor(this.getMessages(), invocationId, definitions, undefined, this.onUsage, this.agentId);
   }
 }
 
-export function createProviderPromptSession(provider: RoutedProvider): { getModelId(): string; getExecutor(state?: unknown): PromptExecutor } {
+export function createProviderPromptSession(provider: RoutedProvider, agentId?: string): { getModelId(): string; getExecutor(state?: unknown): PromptExecutor } {
   const modelId = provider === "codex" ? configuredCodexModel() : provider === "claude-code" ? "claude-code" : provider === "grok" ? configuredGrokModel() : process.env.SAND_OPENROUTER_MODEL?.trim() || "openai/gpt-5.2";
-  return { getModelId: () => modelId, getExecutor: state => new ProviderPromptExecutor(provider, Array.isArray(state) ? state as ProviderMessage[] : undefined, usage => recordRoutedUsage(provider, usage)) };
+  return { getModelId: () => modelId, getExecutor: state => new ProviderPromptExecutor(provider, Array.isArray(state) ? state as ProviderMessage[] : undefined, usage => recordRoutedUsage(provider, usage), agentId) };
 }
 
 export async function runRoutedProviderText(provider: RoutedProvider, messages: readonly ProviderMessage[], options?: {
@@ -337,16 +357,17 @@ export async function runRoutedProviderText(provider: RoutedProvider, messages: 
   readonly executeTool?: RoutedToolExecutor;
   readonly canUseTool?: RoutedCanUseTool;
   readonly onTextDelta?: (delta: string, accumulated: string) => void;
+  readonly agentId?: string;
 }): Promise<string> {
   const invocationId = crypto.randomUUID();
   const onUsage = (usage: UsageRecord) => recordRoutedUsage(provider, usage);
   const result = provider === "codex"
-    ? codexExecutor(messages, invocationId, options?.tools, options?.executeTool, onUsage)
+    ? codexExecutor(messages, invocationId, options?.tools, options?.executeTool, onUsage, options?.agentId)
     : provider === "claude-code"
-      ? claudeExecutor(messages, invocationId, onUsage, options?.mcpServerUrl, options?.canUseTool)
+      ? claudeExecutor(messages, invocationId, onUsage, options?.mcpServerUrl, options?.canUseTool, options?.agentId)
       : provider === "grok"
-        ? grokExecutor(messages, invocationId, options?.tools, options?.executeTool, onUsage)
-        : openRouterExecutor(messages, invocationId, options?.tools, options?.executeTool, onUsage);
+        ? grokExecutor(messages, invocationId, options?.tools, options?.executeTool, onUsage, options?.agentId)
+        : openRouterExecutor(messages, invocationId, options?.tools, options?.executeTool, onUsage, options?.agentId);
   let text = "";
   for await (const event of result.fullStream) {
     if (event.type === "text-delta" && typeof event.textDelta === "string") {
