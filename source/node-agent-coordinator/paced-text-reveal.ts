@@ -8,7 +8,11 @@ export function createPacedTextReveal(options: {
   readonly tickMs?: number;
   readonly schedule?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
 }): PacedTextReveal {
-  const tickMs = options.tickMs ?? 24;
+  // One emit per frame keeps the renderer from re-rendering per token, but the
+  // number of characters per frame must not cap throughput: the old 14-per-tick
+  // ceiling held the screen to ~580 chars/s while the model streamed far faster,
+  // so replies visibly crawled behind the model.
+  const tickMs = options.tickMs ?? 16;
   const schedule: (callback: () => void, ms: number) => ReturnType<typeof setTimeout> =
     options.schedule ?? ((callback, ms) => setTimeout(callback, ms));
   let received = "";
@@ -21,17 +25,20 @@ export function createPacedTextReveal(options: {
 
   const takeCount = (pending: number, flush: boolean) => {
     if (pending <= 0) return 0;
-    if (flush) return Math.min(pending, Math.max(8, Math.ceil(pending / 16)));
-    return Math.min(pending, Math.max(1, Math.min(14, Math.ceil(pending / 10))));
+    if (flush) return Math.min(pending, Math.max(256, Math.ceil(pending / 2)));
+    return Math.min(pending, Math.max(32, Math.ceil(pending / 3)));
   };
 
   const advance = (flush: boolean) => {
     const pending = received.length - shown.length;
     if (pending <= 0) return false;
     let take = takeCount(pending, flush);
-    const lookahead = received.slice(shown.length, shown.length + take + 10);
-    const boundary = lookahead.search(/[\s.,!?;:]/);
-    if (boundary > 0 && boundary <= take + 8) take = Math.min(pending, boundary + 1);
+    // Snap to the LAST word boundary near the budget so whole words appear.
+    // Snapping to the *first* boundary capped the reveal at roughly one word
+    // per tick no matter how large the budget was.
+    const lookahead = received.slice(shown.length, shown.length + take + 8);
+    const boundary = Math.max(lookahead.lastIndexOf(" "), lookahead.lastIndexOf("\n"));
+    if (boundary > 0) take = Math.min(pending, boundary + 1);
     shown = received.slice(0, shown.length + take);
     emitShown(true);
     return shown.length < received.length;

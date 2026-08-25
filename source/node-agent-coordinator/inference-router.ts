@@ -437,9 +437,9 @@ export function createCoordinatorInferenceRouter(options: {
       }
     }
   };
-  const beginActivity = async (agentId: string): Promise<() => void> => {
+  const beginActivity = async (agentId: string, rosterRequest?: Promise<unknown>): Promise<() => void> => {
     try {
-      const remote = await options.dispatchRemote("listAgents", {});
+      const remote = await (rosterRequest ?? options.dispatchRemote("listAgents", {}));
       if (!Array.isArray(remote)) return () => {};
       const roster = mergeLocalInferenceAgents(remote);
       const project = (isRunning: boolean) => roster.map(raw => {
@@ -491,6 +491,9 @@ export function createCoordinatorInferenceRouter(options: {
     const promptForModel = [prompt, attachmentNote].filter(part => part.length > 0).join("\n\n");
     const timestampMs = now();
     const beforeUser = await load();
+    // The roster read and the transcript tail are both round trips to the box and
+    // neither depends on the other, so start them together instead of in series.
+    const rosterRequest = options.dispatchRemote("listAgents", {}).catch(() => null);
     let remote: unknown = null;
     try { remote = await options.dispatchRemote("getAgentTranscriptTail", { id: agentId }); } catch { remote = null; }
     const remoteEntries = Array.isArray(asRecord(remote)?.entries) ? asRecord(remote)!.entries as unknown[] : [];
@@ -511,7 +514,7 @@ export function createCoordinatorInferenceRouter(options: {
       ? await append(agentId, [{ provider, role: "user", content: userContent, ...(richText === undefined ? {} : { richText }), id: userEntry.id, clientNonce, timestampMs }])
       : beforeUser;
     if (persistUser) emitTranscript(agentId, "appended", userEntry);
-    const endActivity = await beginActivity(agentId);
+    const endActivity = await beginActivity(agentId, rosterRequest);
     // Let the thinking avatar paint, then open an empty streaming bubble so the
     // official transcript shows typing dots instead of waiting on a blank row.
     await new Promise<void>(resolve => schedule(resolve, composeDelayMs));
