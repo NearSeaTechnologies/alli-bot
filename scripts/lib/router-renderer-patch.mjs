@@ -143,8 +143,6 @@ export function patchOriginalSettingsPanel(source) {
 
 const KICKSTART_RETRY_BEFORE = "kickstartAwaitingFirstMessage:async I=>{d(I);let P;try{P=await n.kickstartAgent(I)}catch(J){throw m(I),J}P?.isIntroductionInFlight===!1&&m(I)}";
 const KICKSTART_RETRY_AFTER = "kickstartAwaitingFirstMessage:async I=>{d(I);for(let k=0;k<20;k++){let P;try{P=await n.kickstartAgent(I)}catch(J){throw m(I),J}if(P?.isIntroductionInFlight!==!1)return;await new Promise(R=>setTimeout(R,500))}m(I)}";
-const INTRO_SEND_BEFORE = "W.close(),qe.isAbandoned||t(qe.agentId)}catch(Ie){j(Nme(Ie))}finally{se.current=!1,X(!1)}}},[W,le,t])";
-const INTRO_SEND_AFTER = "W.close(),qe.isAbandoned||(t(qe.agentId),V.sendPrompt({agentId:qe.agentId,prompt:\"Hey — introduce yourself. Say your name and what you do in your own voice, then ask how you can help.\",attachments:[],trace:{enterEpochMs:Date.now()}}).catch(()=>{}))}catch(Ie){j(Nme(Ie))}finally{se.current=!1,X(!1)}}},[W,le,t,V])";
 const ABOUT_ITEM_BEFORE = 'se=p.jsx(It.Item,{leading:X,onSelect:H,children:"About"})';
 const ABOUT_ITEM_AFTER = 'se=null';
 const FEEDBACK_ITEM_BEFORE = 'ce=p.jsx(It.Item,{leading:ae,onSelect:h.open,children:"Send Feedback"})';
@@ -154,7 +152,7 @@ const WEEKLY_USAGE_ITEM_AFTER = 'k=null';
 const SIDEBAR_AGENT_NAME_BEFORE = 'className:re("sand-agent-item__name",Fe(h1.name,Ut.body1,Us.medium).className),children:i}';
 const SIDEBAR_AGENT_NAME_AFTER = 'className:re("sand-agent-item__name",Fe(h1.name,Ut.body1,Us.medium).className),children:i==="Grok"?"Alli":i}';
 const WORKING_PERSONA_BEFORE = 'const tln={thinking:"thinking",searching:"searching",browsing:"searching",reading:"searching",connecting:"searching",writing:"working",coding:"working",generating:"loading","running-commands":"working","on-its-computer":"working","on-your-computer":"working",working:"working",messaging:"orbit",waiting:"orbit"},eZ="idle";function nln(n){return n==null?"working":n.kind==="tool"&&n.tool==="SendToAgent"?"sending":tln[dse(n).verb]}';
-const WORKING_PERSONA_AFTER = 'const tln={thinking:"idle",searching:"searching",browsing:"searching",reading:"searching",connecting:"searching",writing:"idle",coding:"idle",generating:"loading","running-commands":"idle","on-its-computer":"idle","on-your-computer":"idle",working:"idle",messaging:"orbit",waiting:"orbit"},eZ="idle";function nln(n){return n==null?"idle":n.kind==="tool"&&n.tool==="SendToAgent"?"sending":tln[dse(n).verb]??"idle"}';
+const WORKING_PERSONA_AFTER = 'const tln={thinking:"idle",searching:"idle",browsing:"idle",reading:"idle",connecting:"idle",writing:"idle",coding:"idle",generating:"idle","running-commands":"idle","on-its-computer":"idle","on-your-computer":"idle",working:"idle",messaging:"idle",waiting:"idle"},eZ="idle";function nln(n){return n==null?"idle":n.kind==="tool"&&n.tool==="SendToAgent"?"idle":tln[dse(n).verb]??"idle"}';
 const WORKING_PHOTO_BEFORE = 'if(z){let ye;e[18]===Symbol.for("react.memo_cache_sentinel")?(ye=p.jsx(ANe,{size:kJn}),e[18]=ye):ye=e[18],Ae=ye}else Se&&G!=null?Ae=p.jsx(Nlt,{color:V.color,eyeColor:sSe,sizePx:DGe,sourceId:G,state:H}):Ae=p.jsx(sd,{color:V.color,emphasis:ce,eyeColor:sSe,ref:fe,shape:V.shape,sizePx:DGe,state:ae});';
 const WORKING_PHOTO_AFTER = 'if(z)Ae=p.jsx(Iee,{avatarKey:L,dataUrl:F.avatarDataUrl??null,fillPx:DGe,isStatic:!0});else Se&&G!=null?Ae=p.jsx(Nlt,{color:V.color,eyeColor:sSe,sizePx:DGe,sourceId:G,state:H}):Ae=p.jsx(sd,{color:V.color,emphasis:ce,eyeColor:sSe,ref:fe,shape:V.shape,sizePx:DGe,state:ae});';
 const ACTIVITY_DOTS_BEFORE = 'j=v?p.jsx("span",{className:q.className,style:q.style,children:p.jsx(ANe,{size:"sm"})}):null';
@@ -169,12 +167,6 @@ export function patchKickstartRetry(source) {
   return replaceExactlyOnce(source, KICKSTART_RETRY_BEFORE, KICKSTART_RETRY_AFTER, "retry kickstart until the bot can introduce itself");
 }
 
-export function patchIntroSendFallback(source) {
-  if (source.includes("Hey — introduce yourself")) return source;
-  if (!source.includes(INTRO_SEND_BEFORE)) return source;
-  return replaceExactlyOnce(source, INTRO_SEND_BEFORE, INTRO_SEND_AFTER, "send introduction prompt after creating a bot");
-}
-
 export function patchWorkingAvatarDots(source) {
   let patched = source;
   if (!patched.includes('working:"idle",messaging:"orbit"') && patched.includes(WORKING_PERSONA_BEFORE)) {
@@ -185,7 +177,7 @@ export function patchWorkingAvatarDots(source) {
     if (patched.includes(ACTIVITY_MARK_STATE_BEFORE)) patched = replaceExactlyOnce(patched, ACTIVITY_MARK_STATE_BEFORE, ACTIVITY_MARK_STATE_AFTER, "activity mark stays idle while working");
   }
   if (patched.includes('thinking:"thinking",searching:"searching"')) {
-    patched = replaceExactlyOnce(patched, 'thinking:"thinking",searching:"searching"', 'thinking:"idle",searching:"searching"', "thinking activity keeps the bot image idle");
+    patched = replaceExactlyOnce(patched, 'thinking:"thinking",searching:"searching"', 'thinking:"idle",searching:"idle"', "thinking and searching keep the bot image idle");
   }
   if (patched.includes('A_t={thinking:"dots",orbit:"orbit"')) {
     patched = replaceExactlyOnce(patched, 'A_t={thinking:"dots",orbit:"orbit"', 'A_t={orbit:"orbit"', "do not overlay thinking dots on the bot image");
@@ -214,7 +206,6 @@ export function patchOriginalComposerFilePicker(source) {
   patched = replaceOnceOrSkip(patched, WEEKLY_USAGE_ITEM_BEFORE, WEEKLY_USAGE_ITEM_AFTER, "hide Weekly usage menu item");
   patched = replaceOnceOrSkip(patched, SIDEBAR_AGENT_NAME_BEFORE, SIDEBAR_AGENT_NAME_AFTER, "rename sidebar Grok");
   patched = patchKickstartRetry(patched);
-  patched = patchIntroSendFallback(patched);
   return patchWorkingAvatarDots(patched);
 }
 
