@@ -7,12 +7,35 @@ import test from "node:test";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const archiveRoot = path.join(repositoryRoot, "research-archives", "original", "0.18.0");
+const GIT_LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
+
+export function parseGitLfsPointer(text) {
+  if (typeof text !== "string" || !text.startsWith(GIT_LFS_POINTER_PREFIX)) return null;
+  const oid = /^oid sha256:([0-9a-f]{64})$/m.exec(text)?.[1];
+  const size = /^size (\d+)$/m.exec(text)?.[1];
+  if (oid == null || size == null) return null;
+  return { oid, size: Number(size) };
+}
 
 async function sha256(file) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(file)) hash.update(chunk);
   return hash.digest("hex");
 }
+
+test("git LFS pointer parser reads oid and size from a pointer file", () => {
+  assert.deepEqual(
+    parseGitLfsPointer(
+      "version https://git-lfs.github.com/spec/v1\noid sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nsize 155793020\n",
+    ),
+    {
+      oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      size: 155793020,
+    },
+  );
+  assert.equal(parseGitLfsPointer("not a pointer"), null);
+  assert.equal(parseGitLfsPointer("version https://git-lfs.github.com/spec/v1\noid sha256:deadbeef\nsize 1\n"), null);
+});
 
 test("preserved 0.18.0 installers match the exact public release inventory", async () => {
   const manifest = JSON.parse(await readFile(path.join(archiveRoot, "artifacts.json"), "utf8"));
@@ -35,7 +58,15 @@ test("preserved 0.18.0 installers match the exact public release inventory", asy
     const metadata = await lstat(file);
     assert.equal(metadata.isFile(), true);
     assert.equal(metadata.isSymbolicLink(), false);
-    assert.equal(metadata.size, artifact.bytes, `${artifact.path} requires git lfs pull`);
+    if (metadata.size !== artifact.bytes) {
+      const pointer = parseGitLfsPointer(await readFile(file, "utf8"));
+      if (pointer != null) {
+        assert.equal(pointer.oid, artifact.sha256);
+        assert.equal(pointer.size, artifact.bytes);
+        continue;
+      }
+      assert.equal(metadata.size, artifact.bytes, `${artifact.path} requires git lfs pull`);
+    }
     assert.equal(await sha256(file), artifact.sha256);
   }
 });
