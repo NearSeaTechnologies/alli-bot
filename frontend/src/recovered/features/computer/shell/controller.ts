@@ -8,6 +8,7 @@ import {
   projectComputerStatus,
   projectHandoff,
   isComputerUseTaskActive,
+  FOREVER_BOX_KEEP_ALIVE_MS,
   type ComputerHandoffResolution,
   type ComputerCursor,
   type ComputerMonitor,
@@ -169,6 +170,13 @@ export function useComputerExperience(input: {
       fetchAsyncTasks(activeAgentId);
     }
   }, [activeAgentId, fetchAsyncTasks, fetchSubagents, statusStore]);
+
+  useEffect(() => {
+    if (activeAgentId == null) return;
+    ensure(activeAgentId);
+    const timer = window.setInterval(() => ensure(activeAgentId), FOREVER_BOX_KEEP_ALIVE_MS);
+    return () => window.clearInterval(timer);
+  }, [activeAgentId, ensure]);
 
   useEffect(() => {
     if (client == null || statusStore == null) return;

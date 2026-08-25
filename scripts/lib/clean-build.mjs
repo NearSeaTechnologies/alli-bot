@@ -97,6 +97,7 @@ function nodeBuildOptions(outfile) {
     platform: "node",
     sourcemap: false,
     target: "node22",
+    loader: { ".css": "text" },
   };
 }
 

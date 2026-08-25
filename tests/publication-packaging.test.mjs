@@ -43,6 +43,8 @@ test("default packaging keeps the polished checksum-pinned renderer", async () =
   assert.match(identity, /alli-bot-icon-1024\.png/);
   assert.match(identity, /iconutil/);
   assert.match(pack, /createAlliDmg\(\{ appPath: outputApp, dmgPath: outputDmg \}\)/);
+  const release = await readFile(path.join(repoRoot, "scripts", "lib", "macos-release.mjs"), "utf8");
+  assert.match(release, /symlink\("\/Applications", path\.join\(staging, "Applications"\)\)/);
   assert.match(pack, /notarizeReleaseIfConfigured\(outputDmg\)/);
   assert.match(pack, /verifyAlliReleaseApp\(outputApp\)/);
   assert.match(pack, /installedAlliBotApp/);

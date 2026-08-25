@@ -13,6 +13,7 @@ export const VNC_FOCUS_DELAY_MS = 32;
 export const VNC_WARM_PREVIEW_LIMIT = 3;
 export const DIRECT_MONITOR_LIMIT = 3;
 export const COMPUTER_ACTIVE_HOLD_MS = 2_500;
+export const FOREVER_BOX_KEEP_ALIVE_MS = 60_000;
 
 export type ComputerPhase = "off" | "starting" | "sleeping" | "local" | "running" | "pulling";
 export type ComputerReadState = "unknown" | "known" | "error";

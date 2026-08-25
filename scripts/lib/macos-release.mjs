@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -20,6 +20,7 @@ export async function createAlliDmg({
   const staging = await mkdtemp(path.join(tmpdir(), "alli-bot-dmg-"));
   try {
     await runCommand(SYSTEM_TOOLS.ditto, [appPath, path.join(staging, path.basename(appPath))]);
+    await symlink("/Applications", path.join(staging, "Applications"));
     await runCommand(SYSTEM_TOOLS.hdiutil, [
       "create",
       "-volname",
