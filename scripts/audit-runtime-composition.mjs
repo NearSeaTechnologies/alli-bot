@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import path from "node:path";
@@ -63,12 +63,17 @@ const forbiddenImmutableRendererAssets = new Set([
 export const IMMUTABLE_RENDERER_ASSET_FORBIDDEN = Object.freeze([...forbiddenImmutableRendererAssets]);
 export const IMMUTABLE_RENDERER_ASSET_ALLOWLIST = Object.freeze(Object.fromEntries(
   (rendererRuntimeManifest.immutableAssets ?? [])
-    .map((asset) => [`assets/${asset.file}`, Object.freeze({
-      artifact: `${rendererRuntimeManifest.artifactRoot}/${asset.file}`,
-      manifestFile: asset.file,
-      bytes: asset.bytes ?? readFileSync(path.join(repoRoot, rendererRuntimeManifest.artifactRoot, asset.file)).byteLength,
-      sha256: asset.sha256,
-    })])
+    .map((asset) => {
+      const artifact = `${rendererRuntimeManifest.artifactRoot}/${asset.file}`;
+      const artifactPath = path.join(repoRoot, rendererRuntimeManifest.artifactRoot, asset.file);
+      const bytes = asset.bytes ?? (existsSync(artifactPath) ? readFileSync(artifactPath).byteLength : undefined);
+      return [`assets/${asset.file}`, Object.freeze({
+        artifact,
+        manifestFile: asset.file,
+        bytes,
+        sha256: asset.sha256,
+      })];
+    })
     .filter(([relativePath]) => !forbiddenImmutableRendererAssets.has(relativePath)),
 ));
 

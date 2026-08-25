@@ -9,7 +9,8 @@ export function createPacedTextReveal(options: {
   readonly schedule?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
 }): PacedTextReveal {
   const tickMs = options.tickMs ?? 24;
-  const schedule = options.schedule ?? setTimeout;
+  const schedule: (callback: () => void, ms: number) => ReturnType<typeof setTimeout> =
+    options.schedule ?? ((callback, ms) => setTimeout(callback, ms));
   let received = "";
   let shown = "";
   let timer: ReturnType<typeof setTimeout> | null = null;

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   coerceAttachmentBytes,
@@ -7,6 +10,9 @@ import {
   normalizePathRequest,
   normalizeStageAttachmentRequest,
 } from "../source/shared/media/attachment-desktop-args.ts";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const officialRenderer = path.join(repoRoot, "src/app/dist/renderer/assets/index-UbX-y3il.js");
 
 test("stageAttachmentBytes accepts the shipped object form and positional args", () => {
   const bytes = new Uint8Array([1, 2, 3]);
@@ -34,12 +40,13 @@ test("discardStagedAttachment accepts { path } or a string", () => {
   assert.equal(normalizePathRequest("/tmp/a"), "/tmp/a");
 });
 
-test("shipped composer file picker anchor is unique", async () => {
+test("shipped composer file picker anchor is unique", async (t) => {
+  if (!existsSync(officialRenderer)) {
+    t.skip("needs npm run bootstrap");
+    return;
+  }
   const { readFile } = await import("node:fs/promises");
-  const { fileURLToPath } = await import("node:url");
-  const path = await import("node:path");
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const source = await readFile(path.join(root, "src/app/dist/renderer/assets/index-UbX-y3il.js"), "utf8");
+  const source = await readFile(officialRenderer, "utf8");
   const needle = "Mn=()=>{ne.current?.click()}";
   assert.equal(source.split(needle).length - 1, 1);
 });
@@ -57,13 +64,14 @@ test("attachment bytes survive IPC-shaped ArrayBuffer views", () => {
   assert.deepEqual(coerceAttachmentBytes(offsetView), bytes);
 });
 
-test("composer HTML staging and picker anchors stay unique", async () => {
+test("composer HTML staging and picker anchors stay unique", async (t) => {
+  if (!existsSync(officialRenderer)) {
+    t.skip("needs npm run bootstrap");
+    return;
+  }
   const { readFile } = await import("node:fs/promises");
-  const { fileURLToPath } = await import("node:url");
-  const path = await import("node:path");
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const source = await readFile(path.join(root, "src/app/dist/renderer/assets/index-UbX-y3il.js"), "utf8");
-  const patch = await readFile(path.join(root, "scripts/lib/router-renderer-patch.mjs"), "utf8");
+  const source = await readFile(officialRenderer, "utf8");
+  const patch = await readFile(path.join(repoRoot, "scripts/lib/router-renderer-patch.mjs"), "utf8");
   assert.equal(source.split("const c=new Uint8Array(await i.arrayBuffer());return e(o,c)").length - 1, 1);
   assert.equal(source.split("b.stageAttachmentBytes({filename:we,bytes:Pe})").length - 1, 1);
   assert.equal(source.split('P&&b!=null?p.jsx(Qln,{onChangeLimit:F,reading:b}):null').length - 1, 1);

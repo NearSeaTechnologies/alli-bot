@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -46,7 +47,7 @@ test("default packaging keeps the polished checksum-pinned renderer", async () =
   assert.doesNotMatch(install, /CFBundleName -string "Grok Bot"/);
 });
 
-test("Router settings use the trusted backend and display recorded inference usage", async () => {
+test("Router settings use the trusted backend and display recorded inference usage", async (t) => {
   const rendererPatch = await readFile(path.join(repoRoot, "scripts", "lib", "router-renderer-patch.mjs"), "utf8");
   const preload = await readFile(path.join(repoRoot, "source", "electron-preload", "preload.ts"), "utf8");
   const mainEdge = await readFile(path.join(repoRoot, "source", "electron-main", "main-edge.ts"), "utf8");
@@ -88,7 +89,12 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(rendererPatch, /Search templates/);
   assert.match(rendererPatch, /merge botdirectory templates/);
   assert.match(rendererPatch, /ee\.current\|\|\(s\(\),o\(\),N\(\),W\.open\(\)\)/);
-  const officialRenderer = await readFile(path.join(repoRoot, "src", "app", "dist", "renderer", "assets", "index-UbX-y3il.js"), "utf8");
+  const officialRendererPath = path.join(repoRoot, "src", "app", "dist", "renderer", "assets", "index-UbX-y3il.js");
+  if (!existsSync(officialRendererPath)) {
+    t.skip("needs npm run bootstrap");
+    return;
+  }
+  const officialRenderer = await readFile(officialRendererPath, "utf8");
   assert.equal(officialRenderer.split("ee.current||(s(),o(),N(),W.open())").length - 1, 1);
   assert.equal(officialRenderer.split("ee.current||(s(),o(),N(),W.openPicker())").length - 1, 0);
   const { patchOriginalComposerFilePicker, patchOriginalComposerFileStage } = await import("../scripts/lib/router-renderer-patch.mjs");
