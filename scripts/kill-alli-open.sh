@@ -1,30 +1,44 @@
 #!/bin/bash
-# Quit every Alli Bot / leftover Grok Bot.app copy from this project so a fresh
-# install is not confused with official Grok Bot or a mounted DMG.
+# Quit this project's own app copies - installed Alli Bot, a local dist build, a
+# mounted Alli Bot DMG, and the older "Grok Bot 0.18 Reconstructed" build - so a
+# fresh install is not confused with one of them.
+#
+# The official Grok Bot (/Applications/Grok Bot.app, com.anysphere.sand) is NEVER
+# touched. It is a different app that happens to share a name prefix; killing it
+# would take down the user's real Grok Bot alongside ours.
 set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+RECONSTRUCTED="/Applications/Grok Bot 0.18 Reconstructed.app"
 
 quit_app() {
   osascript -e "tell application \"$1\" to quit" >/dev/null 2>&1 || true
 }
 
-echo "Quitting Alli Bot and Grok Bot..."
+# Every pattern below must be unique to this project. "/Applications/Grok Bot.app"
+# is deliberately absent.
+OURS=(
+  "/Applications/Alli Bot.app"
+  "/Volumes/Alli Bot"
+  "$ROOT/dist/Alli Bot.app"
+  "$RECONSTRUCTED"
+  "Alli Bot.app/Contents/Resources/app.asar/dist/local-exec-daemon"
+  "Grok Bot 0.18 Reconstructed.app/Contents/Resources/app.asar/dist/local-exec-daemon"
+)
+
+echo "Quitting Alli Bot..."
 quit_app "Alli Bot"
-quit_app "Grok Bot"
+[[ -d "$RECONSTRUCTED" ]] && quit_app "Grok Bot 0.18 Reconstructed"
 sleep 1
 
 echo "Killing leftover app processes..."
-pkill -f "/Applications/Alli Bot.app" >/dev/null 2>&1 || true
-pkill -f "/Volumes/Alli Bot" >/dev/null 2>&1 || true
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-pkill -f "$ROOT/dist/Alli Bot.app" >/dev/null 2>&1 || true
-pkill -f "/Applications/Grok Bot.app" >/dev/null 2>&1 || true
-pkill -f "Alli Bot.app/Contents/Resources/app.asar/dist/local-exec-daemon" >/dev/null 2>&1 || true
-pkill -f "Grok Bot.app/Contents/Resources/app.asar/dist/local-exec-daemon" >/dev/null 2>&1 || true
+for pattern in "${OURS[@]}"; do
+  pkill -f "$pattern" >/dev/null 2>&1 || true
+done
 sleep 1
-pkill -9 -f "/Applications/Alli Bot.app" >/dev/null 2>&1 || true
-pkill -9 -f "/Volumes/Alli Bot" >/dev/null 2>&1 || true
-pkill -9 -f "$ROOT/dist/Alli Bot.app" >/dev/null 2>&1 || true
-pkill -9 -f "/Applications/Grok Bot.app" >/dev/null 2>&1 || true
+for pattern in "${OURS[@]}"; do
+  pkill -9 -f "$pattern" >/dev/null 2>&1 || true
+done
 sleep 1
 
 if [[ -d "/Volumes/Alli Bot" ]]; then
@@ -33,6 +47,11 @@ if [[ -d "/Volumes/Alli Bot" ]]; then
 fi
 
 echo "Remaining related processes:"
-pgrep -lf "Alli Bot.app|Grok Bot.app" || echo "(none)"
+pgrep -lf "Alli Bot.app|Grok Bot 0.18 Reconstructed.app" || echo "(none)"
+
+if pgrep -f "/Applications/Grok Bot.app/Contents/MacOS" >/dev/null 2>&1; then
+  echo "Note: official Grok Bot is running and was left alone. Running both at once is not supported."
+fi
+
 echo "Done. SSH computer tunnel was left running."
 echo "To stop the tunnel: launchctl unload ~/Library/LaunchAgents/team.alongside.allibot.sandbox-tunnel.plist"
