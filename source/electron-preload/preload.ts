@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { extname, join } from "node:path";
+import { getAlliSandDataDir, getAlliSupportDir } from "../shared/product-name.js";
 import {
   coerceAttachmentBytes,
   normalizeCommitStagedRequest,
@@ -108,7 +108,7 @@ function hasDevRestart(env: NodeJS.ProcessEnv): boolean {
 function logAttach(event: string, detail: Record<string, unknown>): void {
   try {
     appendFileSync(
-      join(homedir(), ".grokbot", "attach-debug.log"),
+      join(getAlliSupportDir(), "attach-debug.log"),
       `${new Date().toISOString()} ${event} ${JSON.stringify(detail)}\n`,
     );
   } catch {
@@ -121,7 +121,7 @@ function isSafeAttachmentFilename(value: unknown): value is string {
 }
 
 function stageAttachmentLocally(filename: string, payload: Uint8Array): { ok: true; path: string } {
-  const dir = join(homedir(), ".grokbot", "attachment-staging");
+  const dir = join(getAlliSandDataDir(), "attachment-staging");
   mkdirSync(dir, { recursive: true });
   const stagedPath = join(dir, `${Date.now()}-${randomUUID()}${extname(filename)}`);
   writeFileSync(stagedPath, Buffer.from(payload));

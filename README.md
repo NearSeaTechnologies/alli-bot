@@ -19,6 +19,9 @@ It also adds a few practical experiments:
 - an optional local Docker sandbox in place of the remote box; and
 - a reconstructed settings surface integrated into the polished shipped UI.
 
+Alongside-internal production of the Alli Bot macOS app is documented in
+[docs/PRODUCTION.md](docs/PRODUCTION.md). Ship with `npm run ship`.
+
 This is a hacking and research project, not Anysphere's original monorepo and
 not an official Grok Bot release. Names and module boundaries inferred from a
 compiled application may differ from the original source.

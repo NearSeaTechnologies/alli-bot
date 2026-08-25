@@ -148,6 +148,8 @@ export function createHostGatewayApi(
       toolName: tool.toolName,
       ...(tool.description == null ? {} : { description: tool.description }),
       ...(tool.inputSchema == null ? {} : { inputSchema: typeof tool.inputSchema.toJson === "function" ? tool.inputSchema.toJson() : tool.inputSchema }),
+      ...(tool.accountKey == null ? {} : { accountKey: tool.accountKey }),
+      ...(tool.accountEmail == null ? {} : { accountEmail: tool.accountEmail }),
     }));
   };
   const executeRoutedMcpTool = async (args: any) => {

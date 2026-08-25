@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -40,13 +41,14 @@ test("default packaging keeps the polished checksum-pinned renderer", async () =
   assert.match(pack, /signPackagedApp\(appPath\)/);
   assert.match(pack, /createAlliDmg\(\{ appPath: outputApp, dmgPath: outputDmg \}\)/);
   assert.match(pack, /notarizeReleaseIfConfigured\(outputDmg\)/);
+  assert.match(pack, /verifyAlliReleaseApp\(outputApp\)/);
   assert.match(pack, /installedAlliBotApp/);
   assert.match(reload, /installReconstructedApp/);
   assert.match(reload, /--watch/);
   assert.doesNotMatch(install, /CFBundleName -string "Grok Bot"/);
 });
 
-test("Router settings use the trusted backend and display recorded inference usage", async () => {
+test("Router settings use the trusted backend and display recorded inference usage", async (t) => {
   const rendererPatch = await readFile(path.join(repoRoot, "scripts", "lib", "router-renderer-patch.mjs"), "utf8");
   const preload = await readFile(path.join(repoRoot, "source", "electron-preload", "preload.ts"), "utf8");
   const mainEdge = await readFile(path.join(repoRoot, "source", "electron-main", "main-edge.ts"), "utf8");
@@ -105,7 +107,12 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(rendererPatch, /Search templates/);
   assert.match(rendererPatch, /merge botdirectory templates/);
   assert.match(rendererPatch, /ee\.current\|\|\(s\(\),o\(\),N\(\),W\.open\(\)\)/);
-  const officialRenderer = await readFile(path.join(repoRoot, "src", "app", "dist", "renderer", "assets", "index-UbX-y3il.js"), "utf8");
+  const officialRendererPath = path.join(repoRoot, "src", "app", "dist", "renderer", "assets", "index-UbX-y3il.js");
+  if (!existsSync(officialRendererPath)) {
+    t.skip("needs npm run bootstrap");
+    return;
+  }
+  const officialRenderer = await readFile(officialRendererPath, "utf8");
   assert.equal(officialRenderer.split("ee.current||(s(),o(),N(),W.open())").length - 1, 1);
   assert.equal(officialRenderer.split("ee.current||(s(),o(),N(),W.openPicker())").length - 1, 0);
   const { patchOriginalComposerFilePicker, patchOriginalComposerFileStage } = await import("../scripts/lib/router-renderer-patch.mjs");
@@ -151,13 +158,17 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(codexDirect, /type: "function_call_output"/);
   assert.match(providers, /parameters: jsonSchema\(parameters\)/);
   assert.match(providers, /You are \$\{SAND_PRODUCT_DISPLAY_NAME\}, a warm, concise desktop assistant/);
+  assert.match(providers, /ask which email or account before calling its tools/);
   assert.match(providers, /mcpServers: \{ grok_bot_plugins:/);
   assert.match(providers, /recordRoutedUsage\(provider, usage\)/);
   assert.match(providers, /queryClaude/);
   assert.match(providers, /tools: mcpServerUrl == null \? \[\] : \["mcp__grok_bot_plugins__\*"\]/);
+  assert.match(providers, /allowedTools: \["mcp__grok_bot_plugins__\*"\]/);
   assert.match(providers, /canUseTool:/);
   assert.match(coordinator, /resolveLocalToolPermission/);
-  assert.match(coordinator, /local-tool-permission/);
+  assert.match(coordinator, /resolveAutoReviewApproval/);
+  assert.match(coordinator, /auto-review-approval/);
+  assert.doesNotMatch(coordinator, /Add another \$\{/);
   assert.match(providers, /https:\/\/openrouter\.ai\/api\/v1/);
   assert.match(providers, /OpenRouter needs OPENROUTER_API_KEY/);
   assert.match(providers, /GROK_API_BASE_URL/);
@@ -180,6 +191,9 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(coordinator, /executeTool: async \(definition, toolArgs, toolCallId\) => await executePluginTool/);
   assert.match(coordinator, /callTool: async tool => \{/);
   assert.match(coordinatorMain, /command\(commands, "listRoutedMcpTools", args\)/);
+  const productionProvider = await readFile(path.join(repoRoot, "source", "electron-main", "coordinator", "production-provider.ts"), "utf8");
+  assert.match(productionProvider, /annotateRoutedMcpTool/);
+  assert.doesNotMatch(productionProvider, /status\.email/);
   assert.match(coordinator, /inference-router-transcript\.json/);
   assert.match(mcpBridge, /openWorldHint: !readOnly/);
   assert.match(coordinator, /schemaVersion: 2/);

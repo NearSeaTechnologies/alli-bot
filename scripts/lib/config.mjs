@@ -41,8 +41,10 @@ export const devOutputApp = path.join(outputDir, "Alli Bot Dev.app");
 export const devProfileDir = path.join(cacheDir, "dev-profile");
 
 export const upstreamVersion = "0.18.0";
+export const reconstructedVersion = "1.0.0";
 export const reconstructedBundleId = "team.alongside.allibot";
 export const reconstructedName = "Alli Bot";
+export const outputDmgChecksum = `${outputDmg}.sha256`;
 export const fidelityBundleId = "com.anysphere.sand.reconstructed.fidelity";
 export const fidelityName = "Grok Bot 0.18 Fidelity";
 export const dmgUrl = "https://downloads.cursor.com/grokbot/stable/darwin-arm64/0.18.0/Grok_Bot_0.18.0.dmg";

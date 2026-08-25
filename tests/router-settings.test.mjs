@@ -62,5 +62,5 @@ test("host timeline wakes skip routed providers that cannot run on this machine"
 
 test("settings registry exposes Router with the native settings icon contract", async () => {
   const source = await readFile(path.join(repoRoot, "frontend/src/recovered/features/settings/overlay/view.tsx"), "utf8");
-  assert.match(source, /\{ id: "router", label: "Router", icon: "git-branch" \}/);
+  assert.match(source, /\{ id: "router", label: "Router \(Alli\)", icon: "git-branch" \}/);
 });

@@ -18,7 +18,8 @@ test("reload installs the rebuilt asar into /Applications/Alli Bot.app without a
   assert.match(reload, /kill-alli-open\.sh/);
   assert.match(reload, /\/usr\/bin\/open/);
   assert.match(reload, /installedAlliBotApp/);
-  assert.match(pack, /mode: "asar-swap"/);
+  assert.match(pack, /mode: "copy"/);
+  assert.doesNotMatch(pack, /mode: "asar-swap"/);
   assert.match(npm, /"reload": "node scripts\/reload-alli-bot\.mjs"/);
   assert.match(npm, /"reload:watch": "node scripts\/reload-alli-bot\.mjs --watch"/);
   assert.equal(installedAlliBotApp, "/Applications/Alli Bot.app");

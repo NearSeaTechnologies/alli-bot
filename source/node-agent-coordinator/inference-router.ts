@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 
 import { runRoutedProviderText } from "../host/extensions/inference/provider-session.js";
 import type { SandInferenceProvider } from "../shared/inference-router.js";
+import { DEFAULT_MCP_ACCOUNT_KEY, emailFromPluginInput, lastEmailFromConversation, matchingConnectedAccountEmail } from "../shared/mcp.js";
 import { SandSettingsStore } from "../shared/node/settings/sand-settings-store.js";
 import { createPacedTextReveal } from "./paced-text-reveal.js";
 import { createRoutedMcpBridge } from "./routed-mcp-bridge.js";
@@ -75,7 +76,16 @@ export function routedPluginToolRows(value: unknown): Record<string, any>[] {
 export function resolveRoutedPluginTool(toolName: string, tools: readonly Record<string, any>[], definition?: Record<string, unknown> | null): Record<string, any> | null {
   if (definition != null && typeof definition.providerIdentifier === "string" && typeof definition.toolName === "string") return definition;
   const stripped = toolName.replace(/^mcp__grok_bot_plugins__/, "");
-  return tools.find(tool => tool.name === toolName || tool.name === stripped || tool.toolName === stripped || `mcp__grok_bot_plugins__${tool.name}` === toolName) ?? (definition ?? null);
+  return tools.find(tool => {
+    const name = typeof tool.name === "string" ? tool.name : "";
+    const native = typeof tool.toolName === "string" ? tool.toolName : "";
+    const provider = typeof tool.providerIdentifier === "string" ? tool.providerIdentifier : "";
+    return name === toolName
+      || name === stripped
+      || native === stripped
+      || `mcp__grok_bot_plugins__${name}` === toolName
+      || (provider.length > 0 && native.length > 0 && (stripped === `${provider}-${native}` || stripped === `${provider}_${native}` || stripped.endsWith(`-${native}`) && stripped.slice(0, -(native.length + 1)) === provider));
+  }) ?? (definition ?? null);
 }
 
 export function pluginPermissionIdentity(toolName: string, definition?: Record<string, unknown> | null): { readonly key: string; readonly target: string } {
@@ -90,17 +100,91 @@ export function pluginPermissionIdentity(toolName: string, definition?: Record<s
   };
 }
 
+export function pluginConnectorName(definition?: Record<string, unknown> | null, toolName = ""): string {
+  return pluginPermissionLabel(definition, toolName).catalog;
+}
+
+export function pluginPermissionLabel(
+  definition?: Record<string, unknown> | null,
+  toolName = "",
+  input?: Record<string, unknown> | null,
+  conversation: readonly { readonly role?: unknown; readonly content?: unknown }[] = [],
+  listedTools: readonly Record<string, unknown>[] = [],
+): { readonly catalog: string; readonly account: string | null; readonly label: string } {
+  const provider = typeof definition?.providerIdentifier === "string" ? definition.providerIdentifier : "";
+  const native = typeof definition?.toolName === "string" ? definition.toolName : "";
+  const stripped = toolName.replace(/^mcp__grok_bot_plugins__/, "");
+  const raw = provider.length > 0 ? provider : stripped;
+  const blob = `${provider} ${toolName}`.replace(/[_-]+/g, " ");
+  const known = /\b(gmail|slack|linear|github|notion|outlook|jira|asana|hubspot|salesforce|calendar|drive)\b/i.exec(blob);
+  let catalog = "plugin";
+  if (known != null) {
+    const name = known[1]!.toLowerCase();
+    catalog = name === "calendar" || name === "drive" ? `Google ${name[0]!.toUpperCase()}${name.slice(1)}` : name.replace(/\b\w/g, letter => letter.toUpperCase());
+  } else {
+    const cleaned = raw.replace(/^user-/i, "").split("--")[0]?.replace(/[_-]+/g, " ").trim() ?? "";
+    if (cleaned.length > 0) catalog = cleaned.replace(/\b\w/g, letter => letter.toUpperCase());
+  }
+  const instance = /--([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(raw);
+  let account = instance?.[1] ?? (typeof definition?.accountKey === "string" ? definition.accountKey : null);
+  if (account != null && native.length > 0 && (account === native || account.endsWith(`-${native}`))) {
+    account = account === native ? null : account.slice(0, -(native.length + 1));
+    if (account != null && account.length === 0) account = null;
+  }
+  if (account === DEFAULT_MCP_ACCOUNT_KEY) account = null;
+  const inputEmail = emailFromPluginInput(input);
+  if (inputEmail != null) {
+    account = matchingConnectedAccountEmail(inputEmail, listedTools, definition) ?? inputEmail;
+  } else {
+    const mentioned = matchingConnectedAccountEmail(
+      lastEmailFromConversation(conversation),
+      listedTools,
+      definition,
+    );
+    if (mentioned != null) account = mentioned;
+  }
+  return {
+    catalog,
+    account,
+    label: account != null ? `${catalog} (${account})` : catalog,
+  };
+}
+
+export function pluginAccountsHint(tools: readonly Record<string, any>[]): string | null {
+  const byPlugin = new Map<string, string[]>();
+  for (const tool of tools) {
+    const name = typeof tool.name === "string" ? tool.name : "";
+    const { catalog, account } = pluginPermissionLabel(tool, name);
+    const key = account ?? "default";
+    const list = byPlugin.get(catalog) ?? [];
+    if (!list.includes(key)) list.push(key);
+    byPlugin.set(catalog, list);
+  }
+  const multi = [...byPlugin.entries()].filter(([, accounts]) => accounts.length > 1);
+  if (multi.length === 0) return null;
+  return `Connected plugin accounts: ${multi.map(([plugin, accounts]) => `${plugin} (${accounts.join(", ")})`).join("; ")}. Ask which email or account to use before calling these tools. After the user answers, use that account.`;
+}
+
+function pluginPermissionResolution(value: unknown): string {
+  if (value === "always" || value === "allow-once" || value === "never") return value;
+  if (value === "approved") return "allow-once";
+  return "deny";
+}
+
 export function mergeLocalInferenceAgents(remote: readonly unknown[], nowMs = Date.now()): Record<string, unknown>[] {
-  const alli = createLocalInferenceAgent(nowMs);
   const rest: Record<string, unknown>[] = [];
-  const seen = new Set<string>([LOCAL_INFERENCE_AGENT_ID]);
+  const seen = new Set<string>();
+  let remoteCount = 0;
   for (const raw of remote) {
     const row = asRecord(raw);
-    if (row == null || typeof row.id !== "string" || seen.has(row.id)) continue;
+    if (row == null || typeof row.id !== "string") continue;
+    remoteCount += 1;
+    if (row.id === LOCAL_INFERENCE_AGENT_ID || seen.has(row.id)) continue;
     seen.add(row.id);
     rest.push(row);
   }
-  return rest.length === 0 ? [alli] : [...rest, alli];
+  if (rest.length > 0) return rest;
+  return remoteCount === 0 ? [createLocalInferenceAgent(nowMs)] : [];
 }
 
 export function mergeLocalInferenceRosterEvent(payload: unknown, nowMs = Date.now()): Record<string, unknown> {
@@ -183,6 +267,7 @@ export function createCoordinatorInferenceRouter(options: {
   readonly dispatchRemote: (method: string, args: unknown) => Promise<unknown>;
   readonly now?: () => number;
   readonly composeDelayMs?: number;
+  readonly permissionTimeoutMs?: number;
   readonly schedule?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly runProvider?: typeof runRoutedProviderText;
 }) {
@@ -193,8 +278,18 @@ export function createCoordinatorInferenceRouter(options: {
   const pluginPermissionWaiters = new Map<string, (resolution: string) => void>();
   const sessionAllowedPlugins = new Set<string>();
   const sessionDeniedPlugins = new Set<string>();
+  const liveCards = new Map<string, Record<string, unknown>[]>();
+
+  const upsertLiveCard = (agentId: string, entry: Record<string, unknown>) => {
+    const rows = liveCards.get(agentId) ?? [];
+    const index = rows.findIndex(row => row.id === entry.id);
+    if (index >= 0) rows[index] = entry;
+    else rows.push(entry);
+    liveCards.set(agentId, rows);
+  };
   const runProvider = options.runProvider ?? runRoutedProviderText;
   const composeDelayMs = options.composeDelayMs ?? 80;
+  const permissionTimeoutMs = options.permissionTimeoutMs ?? 5 * 60 * 1000;
   const schedule = options.schedule ?? setTimeout;
 
   const load = async (): Promise<Store> => {
@@ -304,38 +399,34 @@ export function createCoordinatorInferenceRouter(options: {
     let listedTools: Record<string, any>[] = [];
     try { listedTools = routedPluginToolRows(await options.dispatchRemote("listRoutedMcpTools", {})); }
     catch { listedTools = []; }
+    const accountHint = pluginAccountsHint(listedTools);
+    const routedMessages = accountHint == null ? messages : [{ role: "system", content: accountHint }, ...messages];
     const askPluginPermission = async (toolName: string, input: Record<string, unknown>, definition?: Record<string, unknown> | null) => {
       const resolved = resolveRoutedPluginTool(toolName, listedTools, definition);
       const identity = pluginPermissionIdentity(toolName, resolved);
+      const permission = pluginPermissionLabel(resolved, toolName, input, messages, listedTools);
       if (sessionDeniedPlugins.has(identity.key)) return { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
       if (sessionAllowedPlugins.has(identity.key)) return { behavior: "allow" as const, updatedInput: input };
+      sessionAllowedPlugins.add(identity.key);
       const requestId = randomUUID();
       const entryId = `t${turn}p${requestId.slice(0, 8)}`;
-      const ask = { requestId, status: "pending", action: "run-command", target: identity.target };
-      emitTranscript(agentId, "appended", {
+      const approval = {
+        requestId,
+        status: "approved",
+        surface: "mcp",
+        summary: permission.label,
+        reason: `Using ${permission.label}.`,
+        command: permission.label,
+      };
+      const approvalEntry = {
         kind: "send-message",
         id: entryId,
-        message: { type: "local-tool-permission", ask },
+        message: { type: "auto-review-approval", approval },
         timestampMs: now(),
-      });
-      const resolution = await new Promise<string>((resolve) => {
-        const timer = setTimeout(() => resolve("deny"), 5 * 60 * 1000);
-        pluginPermissionWaiters.set(requestId, (value) => { clearTimeout(timer); resolve(value); });
-      });
-      pluginPermissionWaiters.delete(requestId);
-      const allow = resolution === "allow-once" || resolution === "always";
-      if (resolution === "always") sessionAllowedPlugins.add(identity.key);
-      if (resolution === "never") sessionDeniedPlugins.add(identity.key);
-      const status = resolution === "always" ? "always" : resolution === "allow-once" ? "allow-once" : resolution === "never" ? "never" : "denied";
-      emitTranscript(agentId, "updated", {
-        kind: "send-message",
-        id: entryId,
-        message: { type: "local-tool-permission", ask: { ...ask, status } },
-        timestampMs: now(),
-      });
-      return allow
-        ? { behavior: "allow" as const, updatedInput: input }
-        : { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
+      };
+      upsertLiveCard(agentId, approvalEntry);
+      emitTranscript(agentId, "appended", approvalEntry);
+      return { behavior: "allow" as const, updatedInput: input };
     };
     const executePluginTool = async (definition: Record<string, any>, toolArgs: unknown, toolCallId: string) => {
       const toolName = typeof definition.name === "string" && definition.name.length > 0
@@ -361,12 +452,16 @@ export function createCoordinatorInferenceRouter(options: {
     }) : null;
     const onTextDelta = (delta: string, accumulated: string) => reveal.push(delta, accumulated);
     const canUseTool = async (toolName: string, input: Record<string, unknown>) => {
-      const identity = pluginPermissionIdentity(toolName, resolveRoutedPluginTool(toolName, listedTools, null));
-      if (sessionDeniedPlugins.has(identity.key)) return { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
-      return { behavior: "allow" as const, updatedInput: input };
+      // Claude Code emits "haven't granted it yet" unless the CLI itself is
+      // allowed to call the MCP tool. The in-chat Allow card is asked later,
+      // when the tool actually executes.
+      if (toolName.includes("grok_bot_plugins") || toolName.startsWith("mcp__")) {
+        return { behavior: "allow" as const, updatedInput: input };
+      }
+      return await askPluginPermission(toolName, input, resolveRoutedPluginTool(toolName, listedTools, null));
     };
     try {
-      content = await runProvider(provider, messages, bridge == null ? {
+      content = await runProvider(provider, routedMessages, bridge == null ? {
         tools: listedTools,
         executeTool: async (definition, toolArgs, toolCallId) => await executePluginTool(definition, toolArgs, toolCallId),
         onTextDelta,
@@ -387,12 +482,12 @@ export function createCoordinatorInferenceRouter(options: {
     provider(): SandInferenceProvider { return settings.getInferenceProvider(); },
     async dispatch(method: string, args: unknown): Promise<{ handled: boolean; value?: unknown }> {
       const provider = settings.getInferenceProvider();
-      if (method === "resolveLocalToolPermission") {
+      if (method === "resolveLocalToolPermission" || method === "resolveAutoReviewApproval") {
         const record = asRecord(args) ?? {};
         const requestId = typeof record.requestId === "string" ? record.requestId : "";
         const waiter = pluginPermissionWaiters.get(requestId);
         if (waiter != null) {
-          waiter(typeof record.resolution === "string" ? record.resolution : "deny");
+          waiter(pluginPermissionResolution(record.resolution));
           return { handled: true, value: undefined };
         }
       }
@@ -422,7 +517,11 @@ export function createCoordinatorInferenceRouter(options: {
         const local = await load();
         const result = asRecord(remote);
         const remoteEntries = result != null && Array.isArray(result.entries) ? result.entries : [];
-        const entries = [...remoteEntries, ...(local.agents[agentId] ?? []).map(projectInferenceRouterTranscriptEntry)];
+        const entries = [
+          ...remoteEntries,
+          ...(local.agents[agentId] ?? []).map(projectInferenceRouterTranscriptEntry),
+          ...(liveCards.get(agentId) ?? []),
+        ];
         const limit = typeof record.limit === "number" && Number.isInteger(record.limit) && record.limit > 0 ? record.limit : 500;
         return { handled: true, value: { ...(result ?? {}), entries: entries.slice(-limit) } };
       }

@@ -12,9 +12,11 @@ import {
   outputDmg,
   reconstructedBundleId,
   reconstructedName,
+  reconstructedVersion,
 } from "./config.mjs";
 import { createAlliDmg, notarizeReleaseIfConfigured } from "./macos-release.mjs";
 import { verifyOfficialMacReference, verifyReconstructedMacPackage } from "./macos-package-verification.mjs";
+import { verifyAlliReleaseApp, writeReleaseChecksum } from "./release-contract.mjs";
 import { capture, run } from "./process.mjs";
 import { SYSTEM_TOOLS } from "./system-tools.mjs";
 
@@ -61,6 +63,9 @@ async function applyReconstructedInfoPlist(appPath) {
   await run(SYSTEM_TOOLS.plutil, ["-remove", "ElectronAsarIntegrity", infoPlist]);
   await run(SYSTEM_TOOLS.plutil, ["-replace", "CFBundleIdentifier", "-string", reconstructedBundleId, infoPlist]);
   await run(SYSTEM_TOOLS.plutil, ["-replace", "CFBundleDisplayName", "-string", reconstructedName, infoPlist]);
+  await run(SYSTEM_TOOLS.plutil, ["-replace", "CFBundleName", "-string", reconstructedName, infoPlist]);
+  await run(SYSTEM_TOOLS.plutil, ["-replace", "CFBundleShortVersionString", "-string", reconstructedVersion, infoPlist]);
+  await run(SYSTEM_TOOLS.plutil, ["-replace", "CFBundleVersion", "-string", reconstructedVersion, infoPlist]);
   await run(SYSTEM_TOOLS.plutil, ["-remove", "CFBundleURLTypes", infoPlist]);
   await run(SYSTEM_TOOLS.plutil, ["-insert", "CFBundleURLTypes", "-xml", "<array><dict><key>CFBundleTypeRole</key><string>Viewer</string><key>CFBundleURLName</key><string>Alli Bot auth callback</string><key>CFBundleURLSchemes</key><array><string>sand</string></array></dict></array>", infoPlist]);
 }
@@ -82,7 +87,8 @@ export async function materializeDistApp({ builtAsar, builtAsarUnpacked, runtime
   });
   await applyAlliBotMacIdentity(outputApp);
   const identity = await resignApp(outputApp);
-  return { identity, verification };
+  const release = await verifyAlliReleaseApp(outputApp);
+  return { identity, verification, release };
 }
 
 export async function refreshExistingApp(appPath, builtAsar, builtAsarUnpacked) {
@@ -96,29 +102,25 @@ export async function packageReconstructedMacApp({ createDmg = true } = {}) {
   }
   const { builtAsar, builtAsarUnpacked, runtimeApp } = await buildFidelityReconstructedAsar();
   await verifyOfficialMacReference({ runtimeApp });
-  const { identity, verification } = await materializeDistApp({ builtAsar, builtAsarUnpacked, runtimeApp });
+  const { identity, verification, release } = await materializeDistApp({ builtAsar, builtAsarUnpacked, runtimeApp });
   let notarization = { status: "skipped", reason: "Disk image was not built." };
+  let checksum = null;
   if (createDmg) {
     await createAlliDmg({ appPath: outputApp, dmgPath: outputDmg });
+    checksum = await writeReleaseChecksum(outputDmg);
     notarization = await notarizeReleaseIfConfigured(outputDmg);
   }
-  return { builtAsar, builtAsarUnpacked, runtimeApp, identity, verification, notarization };
+  return { builtAsar, builtAsarUnpacked, runtimeApp, identity, verification, release, notarization, checksum };
 }
 
 export async function installReconstructedApp({
   sourceApp = outputApp,
   destinationApp = installedAlliBotApp,
-  builtAsar,
-  builtAsarUnpacked,
 } = {}) {
   if (!existsSync(sourceApp)) throw new Error(`Missing packaged app: ${sourceApp}`);
-  if (await isInstalledAlliBot(destinationApp) && builtAsar != null && builtAsarUnpacked != null) {
-    await refreshExistingApp(destinationApp, builtAsar, builtAsarUnpacked);
-    return { destinationApp, mode: "asar-swap" };
-  }
   await rm(destinationApp, { recursive: true, force: true });
   await run(SYSTEM_TOOLS.ditto, [sourceApp, destinationApp]);
-  await resignApp(destinationApp);
+  await run(SYSTEM_TOOLS.xattr, ["-cr", destinationApp]);
   return { destinationApp, mode: "copy" };
 }
 

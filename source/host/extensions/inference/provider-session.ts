@@ -59,8 +59,9 @@ function grokRouterSystemPrompt(): string {
   return [
     identity,
     `You are running inside ${SAND_PRODUCT_DISPLAY_NAME} as this teammate, not inside Codex CLI or Claude Code.`,
-    `The tools supplied with this request are ${SAND_PRODUCT_DISPLAY_NAME}'s already-connected plugins and accounts. Use them whenever they are relevant instead of claiming that a plugin is unavailable or asking the user to reconnect it.`,
-    "Never ask for an API key for an already-connected plugin. Respond directly to the user in natural language after completing any necessary tool calls.",
+    `The tools supplied with this request are ${SAND_PRODUCT_DISPLAY_NAME}'s already-connected plugins and accounts.`,
+    "If a plugin has more than one connected account, or the user did not name which email to use, ask which email or account before calling its tools. After they answer, use that account and include the address in the tool arguments when possible.",
+    "Do not ask the user to add or reconnect an account that is already connected. Never ask for an API key for an already-connected plugin.",
   ].join("\n");
 }
 
@@ -252,7 +253,11 @@ function claudeExecutor(messages: readonly ProviderMessage[], invocationId: stri
         pathToClaudeCodeExecutable: executable,
         cwd: getSandRootDir(),
         tools: mcpServerUrl == null ? [] : ["mcp__grok_bot_plugins__*"],
-        ...(mcpServerUrl == null ? {} : { mcpServers: { grok_bot_plugins: { type: "http" as const, url: mcpServerUrl } }, strictMcpConfig: true }),
+        ...(mcpServerUrl == null ? {} : {
+          mcpServers: { grok_bot_plugins: { type: "http" as const, url: mcpServerUrl } },
+          strictMcpConfig: true,
+          allowedTools: ["mcp__grok_bot_plugins__*"],
+        }),
         permissionMode: "default",
         includePartialMessages: true,
         ...(canUseTool == null ? {} : {

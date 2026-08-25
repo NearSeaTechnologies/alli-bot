@@ -2,6 +2,7 @@ import { lstat, readlink, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+import { getAlliLegacyGrokbotDir, getAlliSandDataDir } from "../shared/product-name.js";
 import { getSandVariant } from "../shared/node/sand-variant.js";
 import { isPathWithin } from "../shared/node/paths.js";
 import { findSystemErrno } from "../shared/system-errno.js";
@@ -56,7 +57,13 @@ export function resolveSandUserDataDir(argv: readonly string[] = [], env: NodeJS
   return isAbsolute(trimmed) ? trimmed : resolve(cwd, trimmed);
 }
 
-export function getSandProductionRootDir(homeDir = homedir()): string { return join(homeDir, SAND_PRODUCTION_DATA_DIRNAME); }
+export function getSandProductionRootDir(homeDir = homedir()): string {
+  return getAlliSandDataDir(homeDir);
+}
+
+export function getSandLegacyGrokbotRootDir(homeDir = homedir()): string {
+  return getAlliLegacyGrokbotDir(homeDir);
+}
 
 export function resolveSandDataRootOverride(env: NodeJS.ProcessEnv = process.env): string | null {
   const override = env[SAND_DATA_ROOT_ENV]?.trim();
@@ -75,7 +82,7 @@ export function getSandRootDir(homeDir = homedir()): string {
 export function reanchorSandPath(storedPath: string): string {
   const root = getSandRootDir();
   if (isPathWithin(root, storedPath, { isInclusive: true })) return storedPath;
-  const match = /(?:[/\\]\.cursor[/\\]sand(?:-[^/\\]+)?|[/\\]\.grokbot)[/\\](.+)$/.exec(storedPath);
+  const match = /(?:[/\\]Library[/\\]Application Support[/\\]Alli Bot[/\\]sand-data|[/\\]AppData[/\\]Roaming[/\\]Alli Bot[/\\]sand-data|[/\\]\.cursor[/\\]sand(?:-[^/\\]+)?|[/\\]\.grokbot)[/\\](.+)$/.exec(storedPath);
   if (match?.[1] == null) return storedPath;
   const segments = match[1].split(/[/\\]+/);
   if (segments.some((segment) => segment === "." || segment === "..")) return storedPath;

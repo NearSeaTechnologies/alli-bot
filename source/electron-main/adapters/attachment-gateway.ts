@@ -126,9 +126,7 @@ export function createProductionAttachmentGatewayBinding(
         resolveSuggestedDownloadName,
         resolveDefaultDownloadPath,
         showSaveDialog: (window, options) => electron.dialog.showSaveDialog(window, options),
-        showOpenDialog: (window, options) => window == null
-          ? electron.dialog.showOpenDialog(options)
-          : electron.dialog.showOpenDialog(window, options),
+        showOpenDialog: (window, options) => electron.dialog.showOpenDialog(window, options),
         createHiddenWindow: (options) => new electron.BrowserWindow(options),
         showErrorMessage: async (window, options) => {
           if (window == null) await electron.dialog.showMessageBox(options);
