@@ -41,6 +41,8 @@ export function areAgentActivitiesEqual(
 
 export const SAND_DEFAULT_AGENT_NAME = "New Bot";
 export const LEGACY_SAND_DEFAULT_AGENT_NAME = "New Agent";
+export const SAND_FALLBACK_AGENT_NAME = "Alli";
+export const LEGACY_SAND_FALLBACK_AGENT_NAME = "Grok";
 
 export function isSandDefaultAgentName(name: string): boolean {
   const trimmed = name.trim();
@@ -48,6 +50,17 @@ export function isSandDefaultAgentName(name: string): boolean {
     trimmed === SAND_DEFAULT_AGENT_NAME ||
     trimmed === LEGACY_SAND_DEFAULT_AGENT_NAME
   );
+}
+
+export function isSandFallbackAgentName(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed === SAND_FALLBACK_AGENT_NAME || trimmed === LEGACY_SAND_FALLBACK_AGENT_NAME;
+}
+
+export function resolveDisplayedAgentName(name?: string | null): string {
+  const trimmed = name?.trim() ?? "";
+  if (trimmed.length === 0 || trimmed === LEGACY_SAND_FALLBACK_AGENT_NAME) return SAND_FALLBACK_AGENT_NAME;
+  return trimmed;
 }
 
 export const GROUP_MAX_MEMBERS = 6;

@@ -3456,17 +3456,12 @@ export function ProductionRenderer({ bridge, coordinatorPort }: ProductionRender
             accountLabel={UI_TEXT.account}
             bridge={bridge}
             displayName={accountName(account)}
-            experimentsSnapshot={bridge.experiments.initialSnapshot}
             isOpen={accountMenuOpen}
-            labels={{ about: UI_TEXT.about, changeLimit: "Change limit", helpCenter: UI_TEXT.helpCenter, included: "Included", ios: "Get Alli Bot for iOS", logOut: UI_TEXT.logOut, onDemand: "On-demand", sendFeedback: UI_TEXT.sendFeedback, settings: UI_TEXT.settings, signIn: UI_TEXT.signIn, spendThisCycle: "Spend this cycle", weeklyUsage: "Weekly usage" }}
+            labels={{ helpCenter: UI_TEXT.helpCenter, logOut: UI_TEXT.logOut, settings: UI_TEXT.settings, signIn: UI_TEXT.signIn }}
             onError={setNotice}
-            onOpenAbout={() => setOverlay("about")}
             onOpenChange={setAccountMenuOpen}
-            onOpenFeedback={() => setOverlay("feedback")}
             onOpenHelp={() => void bridge.openExternal("https://cursor.com/help")}
-            onOpenIos={() => void bridge.openExternal("https://apps.apple.com/us/app/grok-bot/id6794501026")}
             onOpenSettings={() => { setSettingsSection("general"); setManageSharedRoomId(null); setOverlay("settings"); }}
-            onOpenUsage={() => void bridge.openExternal("https://cursor.com/dashboard/spending")}
             onRequestLogout={() => { setOverlay("confirm-logout"); setAccountMenuOpen(false); }}
             onStatus={setAccount}
             updatePill={<UpdatePill bridge={bridge} labels={UPDATE_PILL_LABELS} />}

@@ -36,6 +36,8 @@ interface CreateOptions {
 }
 
 export class AgentLifecycle {
+  readonly pendingKickstarts = new Set<string>();
+
   constructor(readonly tm: TranscriptManagerLike) {}
 
   async createAgent(
@@ -67,11 +69,14 @@ export class AgentLifecycle {
     };
   }
   async kickstartCreatedAgent(agentId: string): Promise<void> {
-    let ready = false;
-    try {
-      ready = await this.tm.execution.isRunReady();
-    } catch {}
-    await this.kickstartAgent(agentId, ready);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      let ready = false;
+      try {
+        ready = await this.tm.execution.isRunReady();
+      } catch {}
+      if (await this.kickstartAgent(agentId, ready)) return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
   async createBackgroundAgent(
     profile: unknown,
@@ -134,51 +139,62 @@ export class AgentLifecycle {
       return false;
     }
     if (!isRunReady || !this.tm.execution.canExecute) return false;
+    if (this.pendingKickstarts.has(session.id)) return true;
     if (this.tm.runLifecycle.inFlightRunCounts.has(session)) return true;
     const runner = this.tm.runnerRegistry.getRunner(session);
-    this.tm.runLifecycle.beginSessionRun(session);
-    void this.tm.runLifecycle.enqueueExclusiveRun(
-      session.id,
-      async () => {
-        this.tm.turnRuntime.activeRequestSources.set(session.id, "turn");
-        try {
-          const prompt =
-            session.db.getAgentPurpose() === "disk-saver"
-              ? SAND_DISK_SAVER_KICKSTART_PROMPT
-              : SAND_ONBOARDING_KICKSTART_PROMPT;
-          const result = await runner.run(prompt, { hidden: true });
-          let delivered = result.sentMessageCount > 0;
-          if (!result.aborted && result.sentMessageCount === 0)
-            delivered =
-              await this.tm.automationRuntime.ensureHiddenTurnReply(runner);
-          if (result.quiescedForUpgrade) {
-            this.tm.upgradeResume.markAgentResumePending(session, "turn");
-            session.db.setIntroductionPending(false);
-          } else if (!result.aborted && delivered)
-            session.db.setIntroductionPending(false);
-          await this.tm.roster.emitAgentUpdate(session.id);
-        } catch (error) {
-          this.tm.telemetry.reportAgentError({
-            source: "onboarding_kickstart",
-            conversationId: session.id,
-            requestId: this.tm.runLifecycle.lastRequestIdBySession.get(
-              session.id,
-            ),
-            error: classifyAgentError(error),
-            detail: sandErrorDetail(error),
-          });
-          this.tm.trayErrors.pushError({
-            agentId: session.id,
-            title: INTRODUCTION_FAILED_TRAY_TITLE,
-            ...describeAgentRunError(error),
-            dedupeKey: introductionFailedTrayKey(session.id),
-          });
-        } finally {
-          this.tm.runLifecycle.endSessionRun(session);
-        }
-      },
-      { lane: "user", source: "kickstart" },
-    );
+    this.pendingKickstarts.add(session.id);
+    try {
+      void this.tm.runLifecycle.enqueueExclusiveRun(
+        session.id,
+        async () => {
+          let started = false;
+          try {
+            if (!session.db.getIntroductionPending()) return;
+            started = true;
+            this.tm.runLifecycle.beginSessionRun(session);
+            this.tm.turnRuntime.activeRequestSources.set(session.id, "turn");
+            const prompt =
+              session.db.getAgentPurpose() === "disk-saver"
+                ? SAND_DISK_SAVER_KICKSTART_PROMPT
+                : SAND_ONBOARDING_KICKSTART_PROMPT;
+            const result = await runner.run(prompt, { hidden: true });
+            let delivered = result.sentMessageCount > 0;
+            if (!result.aborted && result.sentMessageCount === 0)
+              delivered =
+                await this.tm.automationRuntime.ensureHiddenTurnReply(runner);
+            if (result.quiescedForUpgrade) {
+              this.tm.upgradeResume.markAgentResumePending(session, "turn");
+              session.db.setIntroductionPending(false);
+            } else if (!result.aborted && delivered)
+              session.db.setIntroductionPending(false);
+            await this.tm.roster.emitAgentUpdate(session.id);
+          } catch (error) {
+            this.tm.telemetry.reportAgentError({
+              source: "onboarding_kickstart",
+              conversationId: session.id,
+              requestId: this.tm.runLifecycle.lastRequestIdBySession.get(
+                session.id,
+              ),
+              error: classifyAgentError(error),
+              detail: sandErrorDetail(error),
+            });
+            this.tm.trayErrors.pushError({
+              agentId: session.id,
+              title: INTRODUCTION_FAILED_TRAY_TITLE,
+              ...describeAgentRunError(error),
+              dedupeKey: introductionFailedTrayKey(session.id),
+            });
+          } finally {
+            this.pendingKickstarts.delete(session.id);
+            if (started) this.tm.runLifecycle.endSessionRun(session);
+          }
+        },
+        { lane: "user", source: "kickstart" },
+      );
+    } catch {
+      this.pendingKickstarts.delete(session.id);
+      return false;
+    }
     return true;
   }
 
@@ -206,10 +222,10 @@ export class AgentLifecycle {
     if (!isRunReady || !this.tm.execution.canExecute) return false;
     if (this.tm.runLifecycle.inFlightRunCounts.has(session)) return true;
     const runner = this.tm.runnerRegistry.getRunner(session);
-    this.tm.runLifecycle.beginSessionRun(session);
     void this.tm.runLifecycle.enqueueExclusiveRun(
       session.id,
       async () => {
+        this.tm.runLifecycle.beginSessionRun(session);
         this.tm.turnRuntime.activeRequestSources.set(session.id, "event");
         try {
           const result = await runner.run(SAND_DISK_SAVER_REAUDIT_PROMPT, {
