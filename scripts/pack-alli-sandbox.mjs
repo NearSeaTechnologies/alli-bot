@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, cp, writeFile, chmod } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +10,17 @@ const staging = path.join(os.tmpdir(), `alli-sandbox-${process.pid}`);
 const output = path.join(repoRoot, "dist", "alli-sandbox-computer.tgz");
 const hostMain = path.join(repoRoot, ".build", "fidelity", "app", "dist", "host", "host-main.cjs");
 const daemonDir = path.join(repoRoot, ".build", "fidelity", "app", "dist", "box-exec-daemon");
-const tokenFile = path.join(os.homedir(), ".grokbot", "local-docker-vm.json");
+const tokenCandidates = [
+  path.join(os.homedir(), "Library", "Application Support", "Alli Bot", "sand-data", "local-docker-vm.json"),
+  path.join(os.homedir(), ".grokbot", "local-docker-vm.json"),
+];
+const tokenFile = tokenCandidates.find(candidate => {
+  try {
+    return existsSync(candidate);
+  } catch {
+    return false;
+  }
+}) ?? tokenCandidates[0];
 const computerDir = path.join(repoRoot, "scripts", "alli-sandbox-computer");
 const packedScripts = [
   "install.sh",
@@ -25,7 +36,7 @@ const packedScripts = [
 
 const tokenJson = JSON.parse(await readFile(tokenFile, "utf8"));
 if (typeof tokenJson.token !== "string" || tokenJson.token.length < 32) {
-  throw new Error("Missing ~/.grokbot/local-docker-vm.json token.");
+  throw new Error(`Missing sandbox token at ${tokenFile}.`);
 }
 
 await mkdir(path.join(staging, "box-exec-daemon"), { recursive: true });

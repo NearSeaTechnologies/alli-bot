@@ -3,15 +3,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildFidelityReconstructedAsar } from "./clean-build.mjs";
 import { installedAlliBotApp, outputApp, repoRoot } from "./lib/config.mjs";
 import {
   installReconstructedApp,
-  isInstalledAlliBot,
   packageReconstructedMacApp,
-  refreshExistingApp,
 } from "./lib/package-reconstructed-app.mjs";
-import { verifyOfficialMacReference } from "./lib/macos-package-verification.mjs";
 import { run } from "./lib/process.mjs";
 
 const thisFile = fileURLToPath(import.meta.url);
@@ -62,26 +58,17 @@ async function killOpenApps() {
 }
 
 async function rebuildPayload() {
-  if (await isInstalledAlliBot(outputApp)) {
-    const { builtAsar, builtAsarUnpacked, runtimeApp } = await buildFidelityReconstructedAsar();
-    await verifyOfficialMacReference({ runtimeApp });
-    await refreshExistingApp(outputApp, builtAsar, builtAsarUnpacked);
-    return { builtAsar, builtAsarUnpacked };
-  }
-  const packed = await packageReconstructedMacApp({ createDmg: false });
-  return { builtAsar: packed.builtAsar, builtAsarUnpacked: packed.builtAsarUnpacked };
+  return await packageReconstructedMacApp({ createDmg: false });
 }
 
 async function reload({ launch }) {
   console.log("Rebuilding Alli Bot…");
-  const payload = await rebuildPayload();
+  await rebuildPayload();
   console.log("Stopping the running app…");
   await killOpenApps();
   const installed = await installReconstructedApp({
     sourceApp: outputApp,
     destinationApp: installedAlliBotApp,
-    builtAsar: payload.builtAsar,
-    builtAsarUnpacked: payload.builtAsarUnpacked,
   });
   console.log(`Installed with ${installed.mode}: ${installed.destinationApp}`);
   if (launch) {

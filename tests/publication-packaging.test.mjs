@@ -41,6 +41,7 @@ test("default packaging keeps the polished checksum-pinned renderer", async () =
   assert.match(pack, /signPackagedApp\(appPath\)/);
   assert.match(pack, /createAlliDmg\(\{ appPath: outputApp, dmgPath: outputDmg \}\)/);
   assert.match(pack, /notarizeReleaseIfConfigured\(outputDmg\)/);
+  assert.match(pack, /verifyAlliReleaseApp\(outputApp\)/);
   assert.match(pack, /installedAlliBotApp/);
   assert.match(reload, /installReconstructedApp/);
   assert.match(reload, /--watch/);
@@ -140,13 +141,17 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(codexDirect, /type: "function_call_output"/);
   assert.match(providers, /parameters: jsonSchema\(parameters\)/);
   assert.match(providers, /You are \$\{SAND_PRODUCT_DISPLAY_NAME\}, a warm, concise desktop assistant/);
+  assert.match(providers, /ask which email or account before calling its tools/);
   assert.match(providers, /mcpServers: \{ grok_bot_plugins:/);
   assert.match(providers, /recordRoutedUsage\(provider, usage\)/);
   assert.match(providers, /queryClaude/);
   assert.match(providers, /tools: mcpServerUrl == null \? \[\] : \["mcp__grok_bot_plugins__\*"\]/);
+  assert.match(providers, /allowedTools: \["mcp__grok_bot_plugins__\*"\]/);
   assert.match(providers, /canUseTool:/);
   assert.match(coordinator, /resolveLocalToolPermission/);
-  assert.match(coordinator, /local-tool-permission/);
+  assert.match(coordinator, /resolveAutoReviewApproval/);
+  assert.match(coordinator, /auto-review-approval/);
+  assert.doesNotMatch(coordinator, /Add another \$\{/);
   assert.match(providers, /https:\/\/openrouter\.ai\/api\/v1/);
   assert.match(providers, /OpenRouter needs OPENROUTER_API_KEY/);
   assert.match(providers, /GROK_API_BASE_URL/);
@@ -169,6 +174,9 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(coordinator, /executeTool: async \(definition, toolArgs, toolCallId\) => await executePluginTool/);
   assert.match(coordinator, /callTool: async tool => \{/);
   assert.match(coordinatorMain, /command\(commands, "listRoutedMcpTools", args\)/);
+  const productionProvider = await readFile(path.join(repoRoot, "source", "electron-main", "coordinator", "production-provider.ts"), "utf8");
+  assert.match(productionProvider, /annotateRoutedMcpTool/);
+  assert.doesNotMatch(productionProvider, /status\.email/);
   assert.match(coordinator, /inference-router-transcript\.json/);
   assert.match(mcpBridge, /openWorldHint: !readOnly/);
   assert.match(coordinator, /schemaVersion: 2/);

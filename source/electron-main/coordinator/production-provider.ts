@@ -43,6 +43,7 @@ import {
   createCoordinatorTelemetrySinks,
 } from "./coordinator-telemetry.js";
 import { createElectronDesktopConnectivity } from "./desktop-connectivity.js";
+import { annotateRoutedMcpTool } from "../../shared/mcp.js";
 import type { BoxConnectionInfo } from "../../shared/node/egress-tunnel/box-connection.js";
 
 export interface ProductionCoordinatorAuthStatus extends CoordinatorAuthStatus {
@@ -421,7 +422,12 @@ export function createProductionCoordinatorAdapter<
         onDnsDiagnostic: telemetry.reportBoxDnsDiagnostic,
         onProcessCrash: ports.telemetry.reportProcessCrash,
         getRpcTraceWindowTraceparent: ports.telemetry.getRpcTraceWindowTraceparent,
-        listRoutedMcpTools: () => context.requireMcp().listRoutedTools(),
+        listRoutedMcpTools: async () => {
+          const tools = await context.requireMcp().listRoutedTools();
+          return Array.isArray(tools)
+            ? tools.map((tool) => annotateRoutedMcpTool((tool ?? {}) as Record<string, unknown>))
+            : tools;
+        },
         executeRoutedMcpTool: (request) => context.requireMcp().executeRoutedTool(request),
         native: ports.localExecNative,
       });

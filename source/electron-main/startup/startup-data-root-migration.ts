@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import {
+  getSandLegacyGrokbotRootDir,
   getSandProductionRootDir,
   resolveSandDataRootOverride,
   SAND_DATA_ROOT_ENV,
@@ -60,6 +61,12 @@ function attemptSync<T>(work: () => T): Attempt<T> {
 
 export function getLegacySandProductionRootDir(homeDir = homedir()): string {
   return join(homeDir, ".cursor", "sand");
+}
+
+export function resolveMigratableLegacyProductionRoot(homeDir = homedir()): string {
+  const grokbotRoot = getSandLegacyGrokbotRootDir(homeDir);
+  if (inspectDataRootDirectory(grokbotRoot) === "directory") return grokbotRoot;
+  return getLegacySandProductionRootDir(homeDir);
 }
 
 export function inspectDataRootDirectory(path: string): "absent" | "directory" | "unsafe" {
@@ -193,7 +200,7 @@ export function settleStartupDataRoot(options: SettleStartupDataRootOptions): Da
   if (options.hasDataRootOverride) return { route: "unchanged", reason: "data-root-override" };
   if (options.hasIsolatedUserData) return { route: "unchanged", reason: "isolated-user-data" };
 
-  const legacyRoot = getLegacySandProductionRootDir(options.homeDir);
+  const legacyRoot = resolveMigratableLegacyProductionRoot(options.homeDir);
   const canonicalRoot = getSandProductionRootDir(options.homeDir);
   const legacyState = inspectDataRootDirectory(legacyRoot);
   if (legacyState === "absent") return settleWithoutLegacy(legacyRoot, canonicalRoot);
@@ -225,6 +232,8 @@ export function settleStartupDataRoot(options: SettleStartupDataRootOptions): Da
 export function resolveExistingSandProductionRootDir(homeDir = homedir()): string {
   const canonicalRoot = getSandProductionRootDir(homeDir);
   if (inspectDataRootDirectory(canonicalRoot) === "directory") return canonicalRoot;
+  const grokbotRoot = getSandLegacyGrokbotRootDir(homeDir);
+  if (inspectDataRootDirectory(grokbotRoot) === "directory") return grokbotRoot;
   const legacyRoot = getLegacySandProductionRootDir(homeDir);
   return inspectDataRootDirectory(legacyRoot) === "directory" ? legacyRoot : canonicalRoot;
 }

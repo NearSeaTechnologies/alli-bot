@@ -9,6 +9,20 @@ import { build } from "esbuild";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+async function rmTree(target) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      if (error?.code !== "ENOTEMPTY" && error?.code !== "EBUSY") throw error;
+      await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  await rm(target, { recursive: true, force: true });
+}
+
 async function loadModule() {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "grok-inference-router-transcript-"));
   const output = path.join(temporary, "inference-router.mjs");
@@ -21,7 +35,7 @@ async function loadModule() {
     target: "node22",
   });
   const module = await import(`${pathToFileURL(output).href}?${Date.now()}`);
-  return { module, dispose: () => rm(temporary, { recursive: true, force: true }) };
+  return { module, dispose: () => rmTree(temporary) };
 }
 
 test("routed transcript preserves structured MCP mention rich text across reload", async () => {
@@ -95,11 +109,11 @@ test("local routing serves an Alli agent when the remote box is unavailable", as
     assert.equal(counted.value, 1);
   } finally {
     await loaded.dispose();
-    await rm(dataDir, { recursive: true, force: true });
+    await rmTree(dataDir);
   }
 });
 
-test("local routing keeps Alli when the box already has other agents", async () => {
+test("local routing does not inject a ghost Alli when the box already has agents", async () => {
   const loaded = await loadModule();
   const remote = [{ id: "b6e65ad6-0f1b-4739-b249-f88a99f8eec7", name: "Red" }];
   const { dataDir, router } = await routedClaudeRouter(loaded, async (method) => {
@@ -112,34 +126,31 @@ test("local routing keeps Alli when the box already has other agents", async () 
     assert.equal(listed.handled, true);
     assert.deepEqual(listed.value.map((agent) => ({ id: agent.id, name: agent.name })), [
       { id: "b6e65ad6-0f1b-4739-b249-f88a99f8eec7", name: "Red" },
-      { id: loaded.module.LOCAL_INFERENCE_AGENT_ID, name: "Alli" },
     ]);
     const counted = await router.dispatch("countAgents", {});
-    assert.equal(counted.value, 2);
+    assert.equal(counted.value, 1);
   } finally {
     await loaded.dispose();
-    await rm(dataDir, { recursive: true, force: true });
+    await rmTree(dataDir);
   }
 });
 
-test("local routing does not let a box row occupy alli-local as New Agent", async () => {
+test("local routing drops a box row that occupied alli-local instead of showing a ghost Alli", async () => {
   const loaded = await loadModule();
   const merged = loaded.module.mergeLocalInferenceAgents([
     { id: loaded.module.LOCAL_INFERENCE_AGENT_ID, name: "New Agent", path: "/home/box/sand-data/agents/alli-local/store.db" },
     { id: "4dd48f67-c212-468b-926c-d38fe0707d42", name: "Inbox Triage" },
   ]);
-  assert.equal(merged[0].name, "Inbox Triage");
-  assert.equal(merged[1].id, loaded.module.LOCAL_INFERENCE_AGENT_ID);
-  assert.equal(merged[1].name, "Alli");
-  assert.equal(merged[1].path, "");
-  assert.equal(merged.filter((agent) => agent.id === loaded.module.LOCAL_INFERENCE_AGENT_ID).length, 1);
+  assert.deepEqual(merged.map((agent) => ({ id: agent.id, name: agent.name })), [
+    { id: "4dd48f67-c212-468b-926c-d38fe0707d42", name: "Inbox Triage" },
+  ]);
   const event = loaded.module.mergeLocalInferenceRosterEvent({
     activeAgentId: "4dd48f67-c212-468b-926c-d38fe0707d42",
     agents: [{ id: "4dd48f67-c212-468b-926c-d38fe0707d42", name: "Inbox Triage" }],
   });
   assert.equal(event.activeAgentId, "4dd48f67-c212-468b-926c-d38fe0707d42");
+  assert.equal(event.agents.length, 1);
   assert.equal(event.agents[0].name, "Inbox Triage");
-  assert.equal(event.agents[1].name, "Alli");
 });
 
 test("creating a bot always goes to the computer host so a real agent directory is minted", async () => {
@@ -150,7 +161,7 @@ test("creating a bot always goes to the computer host so a real agent directory 
     assert.equal(created.handled, false);
   } finally {
     await loaded.dispose();
-    await rm(dataDir, { recursive: true, force: true });
+    await rmTree(dataDir);
   }
 });
 
@@ -214,12 +225,49 @@ test("plugin permission identity keeps Gmail, Slack, and Linear separate", async
       { name: "gmail_search_threads", providerIdentifier: "gmail", toolName: "search_threads" },
     ]);
     assert.equal(claudeName.providerIdentifier, "gmail");
+    const sales = loaded.module.resolveRoutedPluginTool("mcp__grok_bot_plugins__user-Gmail--sales-list_labels", [
+      { name: "user-Gmail--sales-list_labels", providerIdentifier: "user-Gmail--sales", toolName: "list_labels" },
+    ]);
+    assert.equal(sales.providerIdentifier, "user-Gmail--sales");
+    assert.equal(loaded.module.pluginConnectorName(sales, "mcp__grok_bot_plugins__user-Gmail--sales-list_labels"), "Gmail");
+    assert.deepEqual(loaded.module.pluginPermissionLabel(sales, "mcp__grok_bot_plugins__user-Gmail--sales-list_labels"), {
+      catalog: "Gmail",
+      account: "sales",
+      label: "Gmail (sales)",
+    });
+    assert.equal(loaded.module.pluginPermissionLabel({ providerIdentifier: "user-Gmail--main", toolName: "search_threads" }, "search_threads").label, "Gmail (main)");
+    assert.equal(loaded.module.pluginPermissionLabel({
+      providerIdentifier: "user-Gmail",
+      toolName: "list_labels",
+      accountKey: "default",
+    }, "list_labels").label, "Gmail");
+    const listed = [
+      { providerIdentifier: "user-Gmail", toolName: "list_labels", accountKey: "default", accountEmail: "pedro.pinho@alongside.team" },
+      { providerIdentifier: "user-Gmail--sales", toolName: "list_labels", accountKey: "sales", accountEmail: "sales@alongside.team" },
+    ];
+    assert.equal(loaded.module.pluginPermissionLabel({
+      providerIdentifier: "user-Gmail",
+      toolName: "list_labels",
+    }, "list_labels", null, [{ role: "user", content: "use pedro.pinho@alongside.team" }], listed).label, "Gmail (pedro.pinho@alongside.team)");
+    assert.equal(loaded.module.pluginPermissionLabel({
+      providerIdentifier: "user-Gmail",
+      toolName: "list_labels",
+    }, "list_labels", null, [{ role: "user", content: "email someone@else.com about the labels" }], listed).label, "Gmail");
+    assert.equal(loaded.module.pluginPermissionLabel({
+      providerIdentifier: "user-Gmail",
+      toolName: "list_labels",
+    }, "list_labels", { mailbox: "sales@alongside.team" }, [{ role: "user", content: "use pedro.pinho@alongside.team" }]).label, "Gmail (sales@alongside.team)");
+    const hint = loaded.module.pluginAccountsHint([
+      { name: "user-Gmail-list_labels", providerIdentifier: "user-Gmail", toolName: "list_labels" },
+      { name: "user-Gmail--sales-list_labels", providerIdentifier: "user-Gmail--sales", toolName: "list_labels" },
+    ]);
+    assert.match(hint, /Gmail \(default, sales\)/);
   } finally {
     await loaded.dispose();
   }
 });
 
-test("Grok asks for Slack and Linear even after Always allow on Gmail", async () => {
+test("connected plugins run without a blocking Allow click", async () => {
   const loaded = await loadModule();
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-plugin-permission-"));
   const { writeFile } = await import("node:fs/promises");
@@ -248,6 +296,7 @@ test("Grok asks for Slack and Linear even after Always allow on Gmail", async ()
     const router = loaded.module.createCoordinatorInferenceRouter({
       dataDir,
       composeDelayMs: 0,
+      permissionTimeoutMs: 500,
       postEvent(_family, payload) { events.push(payload); },
       dispatchRemote: async (method, args) => {
         if (method === "listAgents") return [];
@@ -264,32 +313,24 @@ test("Grok asks for Slack and Linear even after Always allow on Gmail", async ()
         return "used plugins";
       },
     });
-    const pendingFor = plugin => events.find(payload =>
-      payload?.type === "appended"
-      && payload.entry?.message?.type === "local-tool-permission"
-      && payload.entry.message.ask?.status === "pending"
-      && String(payload.entry.message.ask.target).includes(plugin)
-    );
     void router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "check mail, slack, and linear" });
-    const gmailAsk = await waitFor(() => pendingFor("gmail"), "expected a Gmail Allow bar");
-    await router.dispatch("resolveLocalToolPermission", { requestId: gmailAsk.entry.message.ask.requestId, resolution: "always" });
-    const slackAsk = await waitFor(() => pendingFor("slack"), "expected a Slack Allow bar after Always allow on Gmail");
-    await router.dispatch("resolveLocalToolPermission", { requestId: slackAsk.entry.message.ask.requestId, resolution: "allow-once" });
-    const linearAsk = await waitFor(() => pendingFor("linear"), "expected a Linear Allow bar");
-    await router.dispatch("resolveLocalToolPermission", { requestId: linearAsk.entry.message.ask.requestId, resolution: "allow-once" });
-    await waitFor(() => executed.length === 4, "expected every plugin tool to run after approval");
+    await waitFor(() => executed.length === 4, "expected every connected plugin tool to run");
     assert.deepEqual(executed.map(row => row.providerIdentifier), ["gmail", "gmail", "slack", "linear"]);
     const permissionAsks = events.filter(payload =>
-      payload?.type === "appended" && payload.entry?.message?.type === "local-tool-permission"
+      payload?.type === "appended" && payload.entry?.message?.type === "auto-review-approval"
     );
-    assert.equal(permissionAsks.length, 3, "Always allow on Gmail should skip the second Gmail tool, not Slack or Linear");
+    assert.equal(permissionAsks.length, 3, "Gmail should notice once, then Slack and Linear");
+    assert.equal(permissionAsks[0].entry.message.approval.status, "approved");
+    assert.match(permissionAsks[0].entry.message.approval.reason, /Using Gmail/);
+    const connectors = events.filter(payload => payload?.type === "appended" && payload.entry?.message?.type === "connector");
+    assert.equal(connectors.length, 0, "already-connected plugins must not prompt to add another account");
   } finally {
     await loaded.dispose();
-    await rm(dataDir, { recursive: true, force: true });
+    await rmTree(dataDir);
   }
 });
 
-test("Claude plugin bridge asks before Slack tools, not only Gmail", async () => {
+test("Claude plugin bridge runs Slack without a blocking Allow click", async () => {
   const loaded = await loadModule();
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-claude-plugin-permission-"));
   const { writeFile } = await import("node:fs/promises");
@@ -313,6 +354,7 @@ test("Claude plugin bridge asks before Slack tools, not only Gmail", async () =>
     const router = loaded.module.createCoordinatorInferenceRouter({
       dataDir,
       composeDelayMs: 0,
+      permissionTimeoutMs: 500,
       postEvent(_family, payload) { events.push(payload); },
       dispatchRemote: async (method, args) => {
         if (method === "listAgents") return [];
@@ -335,24 +377,17 @@ test("Claude plugin bridge asks before Slack tools, not only Gmail", async () =>
         };
         await rpc("initialize", {});
         await rpc("tools/list", {});
-        const slackCall = rpc("tools/call", { name: "slack_post_message", arguments: { text: "hi" } });
-        const slackAsk = await waitFor(() => events.find(payload =>
-          payload?.type === "appended"
-          && payload.entry?.message?.type === "local-tool-permission"
-          && String(payload.entry.message.ask.target).includes("slack")
-        ), "expected a Slack Allow bar on the Claude plugin bridge");
-        await router.dispatch("resolveLocalToolPermission", { requestId: slackAsk.entry.message.ask.requestId, resolution: "allow-once" });
-        await slackCall;
+        await rpc("tools/call", { name: "slack_post_message", arguments: { text: "hi" } });
         return "used slack";
       },
     });
     await router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "post to slack" });
-    await waitFor(() => executed.some(row => row.providerIdentifier === "slack"), "expected Slack to execute after Allow");
+    await waitFor(() => executed.some(row => row.providerIdentifier === "slack"), "expected Slack to execute");
     assert.equal(executed.length, 1);
     assert.equal(executed[0].toolName, "post_message");
   } finally {
     await loaded.dispose();
-    await rm(dataDir, { recursive: true, force: true });
+    await rmTree(dataDir);
   }
 });
 
@@ -424,6 +459,6 @@ test("routed answers open a streaming typing bubble then settle the same message
     assert.equal(assistantAppends.length, 1);
   } finally {
     await loaded.dispose();
-    await rm(dataDir, { recursive: true, force: true });
+    await rmTree(dataDir);
   }
 });
