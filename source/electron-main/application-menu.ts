@@ -46,8 +46,6 @@ export function buildApplicationMenuTemplate(
     template.push({
       label: electron.appName,
       submenu: [
-        { label: `About ${electron.appName}`, click: () => options.emitOpenAbout() },
-        { type: "separator" },
         { role: "services" },
         { type: "separator" },
         { role: "hide" },
@@ -101,8 +99,6 @@ export function buildApplicationMenuTemplate(
           void electron.openExternal("https://cursor.com/help");
         },
       },
-      { type: "separator" },
-      { label: "Send Feedback", click: () => options.emitOpenFeedback() },
     ],
   });
   return template;

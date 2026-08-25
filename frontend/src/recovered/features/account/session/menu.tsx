@@ -37,13 +37,6 @@ export interface AccountMenuProps {
   };
 }
 
-function isIosLinkEnabled(snapshot: unknown): boolean {
-  if (typeof snapshot !== "object" || snapshot == null || Array.isArray(snapshot)) return false;
-  const gates = (snapshot as { featureGates?: unknown }).featureGates;
-  return typeof gates === "object" && gates != null && !Array.isArray(gates)
-    && (gates as { sand_get_grok_bot_ios?: unknown }).sand_get_grok_bot_ios === true;
-}
-
 function percentLabel(value: number | null): string {
   return value == null ? "—" : `${Math.max(0, Math.min(100, Math.round(value)))}%`;
 }
@@ -220,16 +213,11 @@ export function AccountMenu({
   accountLabel,
   bridge,
   displayName,
-  experimentsSnapshot,
   isOpen,
   updatePill,
   onError,
-  onOpenAbout,
-  onOpenFeedback,
   onOpenHelp,
-  onOpenIos,
   onOpenSettings,
-  onOpenUsage,
   onOpenChange,
   onRequestLogout,
   onStatus,
@@ -237,8 +225,6 @@ export function AccountMenu({
 }: AccountMenuProps) {
   const [busy, setBusy] = useState(false);
   const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(null);
-  const [usageSnapshot, setUsageSnapshot] = useState<{ identity: string; summary: CursorUsageSummary } | null>(null);
-  const [usageOpen, setUsageOpen] = useState(false);
   useEffect(() => {
     let active = true;
     if (account?.kind !== "logged-in") {
@@ -252,23 +238,6 @@ export function AccountMenu({
     });
     return () => { active = false; };
   }, [account?.kind, bridge]);
-
-  useEffect(() => {
-    let active = true;
-    const identity = accountUsageIdentity(account);
-    if (identity == null || !isOpen) {
-      setUsageSnapshot(null);
-      setUsageOpen(false);
-      return () => { active = false; };
-    }
-    void bridge.cursorAccount.getUsageSummary().then((summary) => {
-      if (!active) return;
-      setUsageSnapshot(summary == null ? null : { identity, summary });
-    }).catch(() => {
-      if (active) setUsageSnapshot(null);
-    });
-    return () => { active = false; };
-  }, [account?.kind, account?.kind === "logged-in" ? account.authId : undefined, account?.kind === "logged-in" ? account.email : undefined, bridge, isOpen]);
 
   const signIn = async () => {
     if (busy) return;
@@ -286,10 +255,6 @@ export function AccountMenu({
     onOpenChange(false);
     action();
   };
-  const showIosLink = isIosLinkEnabled(experimentsSnapshot);
-  const usageNow = Date.now();
-  const usageIdentity = accountUsageIdentity(account);
-  const usageSummary = usageSnapshot?.identity === usageIdentity ? usageSnapshot.summary : null;
   let menuIndex = 0;
   const nextMenuIndex = () => menuIndex++;
 
@@ -305,21 +270,8 @@ export function AccountMenu({
         </SandMenuTrigger>
         <SandMenuContent ariaLabel={accountLabel}>
           <div data-component="menu-layout">
-          {account?.kind === "logged-in" && usageSummary != null ? <>
-            <SandMenuItem index={nextMenuIndex()} onSelect={() => setUsageOpen((open) => !open)}>
-              {labels.weeklyUsage}<span>{percentLabel(usageSummary.sandUsagePercent)}</span>
-            </SandMenuItem>
-            {usageOpen ? <div aria-label={labels.weeklyUsage} role="group">
-              <div><span>{usageSummary.isSandTrial ? "Trial usage" : labels.included}</span><span>{percentLabel(usageSummary.sandUsagePercent)}</span><small>{usageResetLabel(usageSummary, usageNow)}</small></div>
-              {usageSummary.onDemand == null ? null : <div><span>{labels.onDemand}</span><span>{onDemandLabel(usageSummary)}</span><small>{countdownLabel(usageSummary.onDemand.resetTimestampMs, usageNow, "Resets")}</small></div>}
-              <SandMenuItem index={nextMenuIndex()} onSelect={() => closeAnd(onOpenUsage)}>{labels.changeLimit}</SandMenuItem>
-            </div> : null}
-          </> : null}
-          {showIosLink ? <SandMenuItem index={nextMenuIndex()} onSelect={() => closeAnd(onOpenIos)}>{labels.ios}</SandMenuItem> : null}
           <SandMenuItem index={nextMenuIndex()} onSelect={() => closeAnd(onOpenSettings)}>{labels.settings}</SandMenuItem>
-          <SandMenuItem index={nextMenuIndex()} onSelect={() => closeAnd(onOpenAbout)}>{labels.about}</SandMenuItem>
           <SandMenuItem index={nextMenuIndex()} onSelect={() => closeAnd(onOpenHelp)}>{labels.helpCenter}</SandMenuItem>
-          <SandMenuItem index={nextMenuIndex()} onSelect={() => closeAnd(onOpenFeedback)}>{labels.sendFeedback}</SandMenuItem>
           {account?.kind === "logged-in" ? <><hr /><SandMenuItem index={nextMenuIndex()} onSelect={onRequestLogout}>{labels.logOut}</SandMenuItem></> : null}
           {account?.kind === "logged-out" ? <><hr /><SandMenuItem disabled={busy} index={nextMenuIndex()} onSelect={() => void signIn()}>{labels.signIn}</SandMenuItem></> : null}
           </div>

@@ -67,11 +67,14 @@ export class AgentLifecycle {
     };
   }
   async kickstartCreatedAgent(agentId: string): Promise<void> {
-    let ready = false;
-    try {
-      ready = await this.tm.execution.isRunReady();
-    } catch {}
-    await this.kickstartAgent(agentId, ready);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      let ready = false;
+      try {
+        ready = await this.tm.execution.isRunReady();
+      } catch {}
+      if (await this.kickstartAgent(agentId, ready)) return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
   async createBackgroundAgent(
     profile: unknown,
@@ -136,10 +139,10 @@ export class AgentLifecycle {
     if (!isRunReady || !this.tm.execution.canExecute) return false;
     if (this.tm.runLifecycle.inFlightRunCounts.has(session)) return true;
     const runner = this.tm.runnerRegistry.getRunner(session);
-    this.tm.runLifecycle.beginSessionRun(session);
     void this.tm.runLifecycle.enqueueExclusiveRun(
       session.id,
       async () => {
+        this.tm.runLifecycle.beginSessionRun(session);
         this.tm.turnRuntime.activeRequestSources.set(session.id, "turn");
         try {
           const prompt =
@@ -206,10 +209,10 @@ export class AgentLifecycle {
     if (!isRunReady || !this.tm.execution.canExecute) return false;
     if (this.tm.runLifecycle.inFlightRunCounts.has(session)) return true;
     const runner = this.tm.runnerRegistry.getRunner(session);
-    this.tm.runLifecycle.beginSessionRun(session);
     void this.tm.runLifecycle.enqueueExclusiveRun(
       session.id,
       async () => {
+        this.tm.runLifecycle.beginSessionRun(session);
         this.tm.turnRuntime.activeRequestSources.set(session.id, "event");
         try {
           const result = await runner.run(SAND_DISK_SAVER_REAUDIT_PROMPT, {
