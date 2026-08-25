@@ -1,12 +1,7 @@
-export type SandBoxRuntime = "local-docker" | "sandbox";
+export type SandBoxRuntime = "sandbox";
 
 export const DEFAULT_SAND_BOX_RUNTIME: SandBoxRuntime = "sandbox";
 
 export function isSandBoxRuntime(value: unknown): value is SandBoxRuntime {
-  return value === "local-docker" || value === "sandbox";
-}
-
-export function resolveSandBoxRuntime(value: unknown): SandBoxRuntime {
-  if (value === "local-docker") return "local-docker";
-  return "sandbox";
+  return value === "sandbox";
 }

@@ -16,7 +16,7 @@ It also adds a few practical experiments:
 - an inference router for Cursor, Claude Code, Codex, and OpenRouter;
 - Grok Bot plugin/MCP tools across the routed providers;
 - local usage tracking for routed inference;
-- an optional local Docker sandbox in place of the remote box; and
+- the always-on sandbox computer as the only box runtime; and
 - a reconstructed settings surface integrated into the polished shipped UI.
 
 Alongside-internal production of the Alli Bot macOS app is documented in
@@ -101,22 +101,19 @@ tool execution across routed conversations.
 providers that return usage data. These figures are activity records, not an
 authoritative provider invoice.
 
-### Local Docker sandbox
+### Sandbox computer
 
-The Router page also has a **Use local Docker VM** toggle. When enabled, Grok
-Bot runs its box host and execution daemon in an owned local container instead
-of connecting to the remote sandbox.
+The Router page shows a **Use sandbox computer** switch that is always on. The
+box host and execution daemon run only on the sandbox computer, reached through
+the `localhost:1340` tunnel, so every new agent is created there. There is no
+local Docker or remote-box fallback; if the tunnel is down the switch stays on
+and the card reports that it is waiting for the sandbox.
 
-The container:
-
-- is bound only to loopback ports;
-- mounts content-addressed host and daemon artifacts read-only;
-- reuses the user's existing provider authentication where needed;
-- is validated before the coordinator connects; and
-- is stopped or replaced through the same settings lifecycle.
-
-Docker Desktop, or another compatible local Docker daemon, must be running.
-Remote mode remains the default.
+The desktop never starts, inspects, or stops a local container; Docker is not
+required on the Mac. The card's reset and update actions run over SSH against
+the sandbox host. If an older build left a `grok-bot-local-vm` container on
+the Mac holding port 1340, remove it once with `docker rm -f grok-bot-local-vm`
+so the tunnel can bind.
 
 ## Requirements
 
@@ -169,8 +166,8 @@ polished shipped renderer
      Electron main
           │
           ├── settings, secrets, auth and plugin lifecycle
-          ├── remote box connector
-          └── owned local Docker connector
+          ├── remote box connector (credentials only)
+          └── sandbox computer connector
                        │
                        ▼
               coordinator + host
@@ -218,7 +215,7 @@ Generated directories including `.cache`, `.build`, `dist`, `src/app/dist`,
 ## Project status
 
 The app launches and the core reconstructed flows are usable, including routed
-inference, connected plugins, and the local Docker sandbox. This is still an
+inference, connected plugins, and the sandbox computer. This is still an
 experimental reconstruction: it targets one pinned macOS/arm64 release, depends
 on external provider sessions, and does not promise compatibility with future
 Grok Bot versions.
