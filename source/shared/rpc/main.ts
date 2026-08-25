@@ -68,7 +68,6 @@ export const MAIN_METHOD_TABLE = {
   getInferenceRouter: { args: "none" },
   setInferenceRouter: { args: "object" },
   getBoxRuntime: { args: "none" },
-  setBoxRuntime: { args: "object" },
   transcribeAudio: { args: "object" },
   getCursorAuthStatus: { args: "none" },
   loginCursor: { args: "none" },
