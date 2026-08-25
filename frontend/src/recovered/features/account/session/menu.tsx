@@ -1,6 +1,6 @@
 // @evidence src/app/dist/renderer/assets/index-UbX-y3il.js#L499 bytes 2328200,2331500,2332789,2337409,2346511,2346725,2346952,2347189,2347629,2347841,2347970; sha256=ef4e9831b65d39633f09c9ad0c083b98b7ebf52e3bb558182aee5bde31f876fa
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { CursorAuthStatus, CursorUsageSummary, DesktopBridge } from "../../../contracts/desktop-bridge";
+import type { CursorAuthStatus, DesktopBridge } from "../../../contracts/desktop-bridge";
 import { SandMenuContent, SandMenuItem, SandMenuRoot, SandMenuTrigger } from "../../../ui/sand-floating-primitives";
 
 export interface AccountMenuProps {
@@ -8,67 +8,20 @@ export interface AccountMenuProps {
   accountLabel: string;
   bridge: Pick<DesktopBridge, "cursorAccount">;
   displayName: string;
-  experimentsSnapshot: unknown;
   isOpen: boolean;
   updatePill?: ReactNode;
   onError(message: string): void;
-  onOpenAbout(): void;
-  onOpenFeedback(): void;
   onOpenHelp(): void;
-  onOpenIos(): void;
   onOpenSettings(): void;
-  onOpenUsage(): void;
   onOpenChange(open: boolean): void;
   onRequestLogout(): void;
   onStatus(status: CursorAuthStatus): void;
   labels: {
-    about: string;
     helpCenter: string;
     logOut: string;
-    sendFeedback: string;
     settings: string;
     signIn: string;
-    weeklyUsage: string;
-    included: string;
-    onDemand: string;
-    spendThisCycle: string;
-    changeLimit: string;
-    ios: string;
   };
-}
-
-function percentLabel(value: number | null): string {
-  return value == null ? "—" : `${Math.max(0, Math.min(100, Math.round(value)))}%`;
-}
-
-const MINUTES_PER_DAY = 1440;
-
-function countdownLabel(nextResetMs: number | null, nowMs: number, prefix: "Resets" | "Ends"): string | null {
-  if (nextResetMs == null || !Number.isFinite(nextResetMs)) return null;
-  const days = Math.ceil((nextResetMs - nowMs) / (MINUTES_PER_DAY * 60 * 1000));
-  if (days <= 0) return `${prefix} today`;
-  return `${prefix} in ${days} ${days === 1 ? "day" : "days"}`;
-}
-
-export function usageResetLabel(summary: Pick<CursorUsageSummary, "sandUsageResetTimestampMs" | "isSandTrial" | "hasNonZeroIncludedLimit">, nowMs: number): string | null {
-  const prefix = summary.isSandTrial ? "Ends" : "Resets";
-  return countdownLabel(summary.sandUsageResetTimestampMs, nowMs, prefix)
-    ?? (!summary.isSandTrial && summary.hasNonZeroIncludedLimit ? "Resets in 7 days" : null);
-}
-
-export function accountUsageIdentity(account: CursorAuthStatus | null): string | null {
-  return account?.kind === "logged-in" ? `logged-in:${account.authId ?? account.email ?? "account"}` : null;
-}
-
-function currencyLabel(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-function onDemandLabel(summary: CursorUsageSummary): string {
-  const onDemand = summary.onDemand;
-  if (onDemand == null) return "—";
-  const used = currencyLabel(onDemand.usedCents);
-  return onDemand.limitCents == null ? used : `${used} / ${currencyLabel(onDemand.limitCents)}`;
 }
 
 export function normalizeAccountName(value: string): string {
