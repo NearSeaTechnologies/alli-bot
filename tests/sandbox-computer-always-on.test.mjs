@@ -6,7 +6,6 @@ import test from "node:test";
 import * as esbuild from "esbuild";
 
 import {
-  LOCAL_DOCKER_KEEP_ALIVE_MS,
   SANDBOX_COMPUTER_KEEP_AWAKE_COMMAND,
   runSandboxComputerKeepAwake,
 } from "../source/shared/sandbox-computer-always-on.ts";
@@ -30,7 +29,6 @@ test("keep-awake command disables sleep, DPMS, and power-off options", () => {
   assert.match(SANDBOX_COMPUTER_KEEP_AWAKE_COMMAND, /xset -dpms/);
   assert.match(SANDBOX_COMPUTER_KEEP_AWAKE_COMMAND, /ShowHibernate -s false/);
   assert.match(SANDBOX_COMPUTER_KEEP_AWAKE_COMMAND, /ShowSuspend -s false/);
-  assert.equal(LOCAL_DOCKER_KEEP_ALIVE_MS, 15_000);
 });
 
 test("keep-awake runner applies the command and skips guest-tool failures", async () => {
@@ -94,14 +92,11 @@ test("computer overlay keep-alive ensures once per agent, then on an interval", 
   assert.match(keepAliveEffect, /return \(\) => window\.clearInterval\(timer\);/);
 });
 
-test("local Docker VM stays running while selected and still stops when leaving local-docker", async () => {
-  const localDocker = await readFile(path.join(repoRoot, "source", "electron-main", "box", "local-docker-host-connector.ts"), "utf8");
-  assert.match(localDocker, /"--restart", "always"/);
-  assert.doesNotMatch(localDocker, /unless-stopped/);
-  assert.match(localDocker, /startLocalDockerKeepAlive/);
-  const stopAt = localDocker.indexOf("export async function stopLocalDockerBox");
-  assert.ok(stopAt >= 0);
-  const stopBody = localDocker.slice(stopAt, stopAt + 700);
-  assert.match(stopBody, /stopLocalDockerKeepAlive\(\)/);
-  assert.match(stopBody, /\["stop", LOCAL_DOCKER_BOX_CONTAINER\]/);
+test("desktop sandbox connector never starts a local Docker keep-alive", async () => {
+  const connector = await readFile(path.join(repoRoot, "source", "electron-main", "box", "local-docker-host-connector.ts"), "utf8");
+  const shared = await readFile(path.join(repoRoot, "source", "shared", "sandbox-computer-always-on.ts"), "utf8");
+  assert.doesNotMatch(connector, /LOCAL_DOCKER_/);
+  assert.doesNotMatch(connector, /startLocalDockerKeepAlive|stopLocalDockerKeepAlive/);
+  assert.doesNotMatch(connector, /"--restart"/);
+  assert.doesNotMatch(shared, /LOCAL_DOCKER_KEEP_ALIVE_MS/);
 });

@@ -335,7 +335,6 @@ export function createDesktopPreloadBridge(options: {
       getInferenceRouter: () => edge("getInferenceRouter"),
       setInferenceRouter: (provider: string) => edge("setInferenceRouter", { provider }),
       getBoxRuntime: () => edge("getBoxRuntime"),
-      setBoxRuntime: (mode: string) => edge("setBoxRuntime", { mode }),
       clientPersistence: {
         read: (key: string) => ipc.invoke(CLIENT_PERSISTENCE_CHANNELS.read, { key }),
         async write(key: string, value: string) { await ipc.invoke(CLIENT_PERSISTENCE_CHANNELS.write, { key, value }); },

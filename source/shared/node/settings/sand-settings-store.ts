@@ -112,14 +112,15 @@ export class SandSettingsStore {
   setAutoUpdateWhenIdleOptIn(value: boolean): void { this.update((s) => ({ ...s, autoUpdateWhenIdleOptIn: value })); }
   getThemePreference(): SandThemePreference { return this.load().themePreference ?? DEFAULT_SAND_THEME_PREFERENCE; }
   setThemePreference(value: SandThemePreference): void { this.update((s) => ({ ...s, themePreference: value })); }
-  getBoxRuntime(): SandBoxRuntime { return this.load().boxRuntime ?? DEFAULT_SAND_BOX_RUNTIME; }
-  setBoxRuntime(value: SandBoxRuntime): void { this.update((s) => ({ ...s, boxRuntime: value })); }
-  migrateLegacyRemoteBoxRuntime(): void {
+  /** The sandbox computer is the only box runtime; persisted values never override it. */
+  getBoxRuntime(): SandBoxRuntime { return DEFAULT_SAND_BOX_RUNTIME; }
+  /** Rewrites legacy `remote` / `local-docker` runtimes on disk so old settings files converge on the sandbox. */
+  migrateLegacyBoxRuntime(): void {
     if (!existsSync(this.settingsPath)) return;
     try {
       const raw = JSON.parse(readFileSync(this.settingsPath, "utf8")) as { boxRuntime?: unknown };
-      if (raw.boxRuntime !== "remote") return;
-      this.setBoxRuntime("sandbox");
+      if (raw.boxRuntime === undefined || isSandBoxRuntime(raw.boxRuntime)) return;
+      this.update((s) => ({ ...s, boxRuntime: DEFAULT_SAND_BOX_RUNTIME }));
     } catch {}
   }
   getEgressTunnelEnabled(): boolean { return this.load().egressTunnelEnabled; }

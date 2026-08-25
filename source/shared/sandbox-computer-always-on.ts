@@ -16,8 +16,6 @@ export const SANDBOX_COMPUTER_KEEP_AWAKE_COMMAND = [
   "xfconf-query -c xfce4-session -p /shutdown/LockCommand -s '' --create -t string >/dev/null 2>&1 || true",
 ].join("\n");
 
-export const LOCAL_DOCKER_KEEP_ALIVE_MS = 15_000;
-
 export async function runSandboxComputerKeepAwake(
   run: (command: string) => Promise<unknown>,
 ): Promise<"applied" | "skipped"> {
