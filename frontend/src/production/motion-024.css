@@ -30,23 +30,6 @@
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-@keyframes sand-024-popover-bottom {
-  from { opacity: 0; transform: translate3d(0, -6px, 0) scale(.94); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-@keyframes sand-024-popover-top {
-  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(.94); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-@keyframes sand-024-popover-left {
-  from { opacity: 0; transform: translate3d(6px, 0, 0) scale(.94); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-@keyframes sand-024-popover-right {
-  from { opacity: 0; transform: translate3d(-6px, 0, 0) scale(.94); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-
 .sand-kit-button,
 .sand-kit-icon-button,
 .sand-agent-item,
@@ -88,35 +71,18 @@
 .ui-menu__content,
 .ui-menu__tooltip,
 [aria-label="Account"].ui-menu__content,
-[role="menu"],
-[role="listbox"],
-[role="dialog"].sand-alert-dialog,
 .sand-alert-dialog {
   transform-origin: var(--transform-origin, center top);
   animation: sand-024-pop var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
 }
 
-[data-starting-style],
-[data-ending-style] {
-  opacity: 0;
-  transform: translateY(-4px) scale(.96);
-}
-[data-starting-style][data-side="bottom"],
-[data-ending-style][data-side="bottom"] {
-  animation: sand-024-popover-bottom var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
-}
-[data-starting-style][data-side="top"],
-[data-ending-style][data-side="top"] {
-  animation: sand-024-popover-top var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
-}
-[data-starting-style][data-side="left"],
-[data-ending-style][data-side="left"] {
-  animation: sand-024-popover-left var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
-}
-[data-starting-style][data-side="right"],
-[data-ending-style][data-side="right"] {
-  animation: sand-024-popover-right var(--cursor-duration-slow) var(--cursor-easing-out-quint) both;
-}
+/* The host renderer owns [data-starting-style] / [data-ending-style]. This
+ * overlay is injected into every document, including the original Grok Bot
+ * bundle, which drives those attributes with its own transitions
+ * (transform: scale(.97), translate3d(0,-2px,0) scale(.98), height: 0).
+ * Redeclaring them here - and layering `animation: ... both` on top of the
+ * host's transitions for the same elements - overrode that motion and made
+ * menus and popovers animate twice. Leave them to the renderer that owns them. */
 
 .sand-tray,
 .sand-tray-stack .sand-tray,
