@@ -690,6 +690,11 @@ export function ConversationTranscript({ entries, hasOlder = false, isLoadingOld
       return next;
     });
   };
+  // Both of these used to be recomputed inside the entries.map below - once per
+  // entry - making the transcript render quadratic in conversation length.
+  const keyboardWidgetEntryId = transcriptKeyboardWidgetEntryId(entries);
+  const entriesById = new Map<string, ConversationTranscriptEntry>();
+  for (const candidate of entries) if (!entriesById.has(candidate.id)) entriesById.set(candidate.id, candidate);
   const transcriptAdjacency = projectTranscriptAdjacency(entries, {
     entryHasThreadChip: resolveTranscriptCardInteractions == null
       ? undefined
@@ -709,7 +714,7 @@ export function ConversationTranscript({ entries, hasOlder = false, isLoadingOld
         if (entry.kind === "permission-request") return <PermissionRequestLeaf isGroupStart={entry.isGroupStart} key={entry.id} timestampMs={entry.timestampMs} title={entry.title} />;
         if (entry.kind === "send-message") {
           if (transcriptCards == null) return null;
-          const isKeyboardTarget = transcriptKeyboardWidgetEntryId(entries) === entry.id;
+          const isKeyboardTarget = keyboardWidgetEntryId === entry.id;
           const card = <TranscriptCardRootEntry
             adjacency={transcriptAdjacency[index]}
             contract={transcriptCards}
@@ -730,7 +735,7 @@ export function ConversationTranscript({ entries, hasOlder = false, isLoadingOld
         const pending = entry.delivery === "pending" || entry.delivery === "queued";
         const failed = entry.delivery === "failed";
         const replyPreview = entry.replyToId == null || resolveReplyPreview == null ? null : (resolveReplyPreview(entry.replyToId) ?? { kind: "missing" as const });
-        const referencedEntry = entry.replyToId == null ? undefined : entries.find((candidate) => candidate.id === entry.replyToId);
+        const referencedEntry = entry.replyToId == null ? undefined : entriesById.get(entry.replyToId);
         const referencedAuthorName = referencedEntry?.kind === "message"
           ? referencedEntry.author
           : replyPreview?.kind === "user-text" ? "You" : "Agent";

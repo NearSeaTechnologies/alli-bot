@@ -1400,7 +1400,15 @@ export function ProductionRenderer({ bridge, coordinatorPort }: ProductionRender
     },
     [client]
   );
-  const visibleAgents = agents.filter((agent) => !agent.isHidden).map((agent) => ({ ...agent, isPinned: pinnedAgentIds.includes(agent.id) }));
+  // Rebuilt on every render this list gave projectedSidebarSections a new input
+  // each time, so that memo never hit and the whole agent list re-rendered on
+  // every keystroke and every streamed token. The Set also drops the O(n*m)
+  // includes() that ran once per agent.
+  const pinnedAgentIdSet = useMemo(() => new Set(pinnedAgentIds), [pinnedAgentIds]);
+  const visibleAgents = useMemo(
+    () => agents.filter((agent) => !agent.isHidden).map((agent) => ({ ...agent, isPinned: pinnedAgentIdSet.has(agent.id) })),
+    [agents, pinnedAgentIdSet],
+  );
   const pinnedAccountKey = account?.kind === "logged-in" ? account.authId ?? account.email ?? "account" : account?.kind ?? "unknown";
   const settingsNoticeSurface = overlay === "settings" || overlay === "plugins" ? overlay : "none";
   const settingsNoticeScope = `${pinnedAccountKey}:${account?.kind ?? "unknown"}:${settingsNoticeSurface}`;
@@ -1628,7 +1636,7 @@ export function ProductionRenderer({ bridge, coordinatorPort }: ProductionRender
   useEffect(() => {
     if (sidebarSectionsWriteFailure != null) setNotice(sidebarSectionsWriteFailure.code);
   }, [sidebarSectionsWriteFailure]);
-  const hiddenAgents = agents.filter((agent) => agent.isHidden);
+  const hiddenAgents = useMemo(() => agents.filter((agent) => agent.isHidden), [agents]);
   const orgChartAgents = useMemo(() => agents.map((agent) => ({ ...agent, isRunning: agent.isRunning === true })), [agents]);
   const liveEntries = activeAgent == null ? EMPTY_ENTRIES : entriesByAgent[activeAgent.id] ?? EMPTY_ENTRIES;
   const entries = useMemo(
