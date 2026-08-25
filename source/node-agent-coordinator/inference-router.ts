@@ -250,6 +250,19 @@ export function parseAskQuestionArgs(args: unknown): SandWidget | null {
   return parsed.success ? parsed.data : null;
 }
 
+export function widgetReplyText(widget: unknown, picked: string): string {
+  const record = asRecord(widget);
+  const options = Array.isArray(record?.options) ? record.options : [];
+  for (const raw of options) {
+    const option = asRecord(raw);
+    if (option == null) continue;
+    const label = typeof option.label === "string" ? option.label.trim() : "";
+    const value = typeof option.value === "string" ? option.value.trim() : "";
+    if (picked === value || picked === label) return value.length > 0 ? value : label;
+  }
+  return picked;
+}
+
 function pluginPermissionResolution(value: unknown): string {
   if (value === "always" || value === "allow-once" || value === "never") return value;
   if (value === "approved") return "allow-once";
@@ -492,9 +505,12 @@ export function createCoordinatorInferenceRouter(options: {
     }, -1);
     const turn = Math.max(remoteTurn, localTurn) + 1;
     const userContent = promptForModel.length > 0 ? promptForModel : prompt;
+    const persistUser = args.persistUser !== false;
     const userEntry = { kind: "message", id: `t${turn}u`, role: "user", content: userContent, ...(richText === undefined ? {} : { richText }), isStreaming: false, timestampMs, clientNonce };
-    const withUser = await append(agentId, [{ provider, role: "user", content: userContent, ...(richText === undefined ? {} : { richText }), id: userEntry.id, clientNonce, timestampMs }]);
-    emitTranscript(agentId, "appended", userEntry);
+    const withUser = persistUser
+      ? await append(agentId, [{ provider, role: "user", content: userContent, ...(richText === undefined ? {} : { richText }), id: userEntry.id, clientNonce, timestampMs }])
+      : beforeUser;
+    if (persistUser) emitTranscript(agentId, "appended", userEntry);
     const endActivity = await beginActivity(agentId);
     // Let the thinking avatar paint, then open an empty streaming bubble so the
     // official transcript shows typing dots instead of waiting on a blank row.
@@ -646,6 +662,46 @@ export function createCoordinatorInferenceRouter(options: {
     await append(agentId, [{ provider, role: "assistant", content, id: assistantId, timestampMs: assistantTimestampMs }]);
     return { accepted: true, clientNonce, provider };
   };
+  const persistWidgetAnswer = async (
+    agentId: string,
+    provider: Exclude<SandInferenceProvider, "cursor">,
+    content: string,
+  ) => {
+    const current = await load();
+    const existing = current.agents[agentId] ?? [];
+    const live = liveCards.get(agentId) ?? [];
+    const highest = [...existing, ...live].reduce((max, entry) => {
+      const id = typeof entry.id === "string" ? entry.id : "";
+      const match = /^t(\d+)/.exec(id);
+      return match == null ? max : Math.max(max, Number(match[1]));
+    }, -1);
+    const timestampMs = now();
+    const id = `t${highest + 1}u`;
+    await append(agentId, [{ provider, role: "user", content, id, timestampMs }]);
+    emitTranscript(agentId, "appended", { kind: "message", id, role: "user", content, isStreaming: false, timestampMs });
+  };
+  const enqueueExecute = (
+    provider: Exclude<SandInferenceProvider, "cursor">,
+    record: Record<string, unknown>,
+    settleWidgets: boolean,
+  ) => {
+    const agentId = typeof record.agentId === "string" ? record.agentId : "";
+    if (settleWidgets && agentId.length > 0) settleAgentWidgetsForNewPrompt(agentId);
+    const previous = queues.get(agentId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(() => execute(provider, record)).catch(async (error) => {
+      const timestampMs = now();
+      const content = `Router error: ${error instanceof Error ? error.message : String(error)}`;
+      if (agentId.length > 0) {
+        const id = `t${Date.now()}s0`;
+        await append(agentId, [{ provider, role: "assistant", content, id, timestampMs }]);
+        emitTranscript(agentId, "appended", { kind: "send-message", id, message: { type: "text", content }, timestampMs });
+      }
+    });
+    const queued = next.finally(() => { if (queues.get(agentId) === queued) queues.delete(agentId); });
+    queues.set(agentId, queued);
+    void queued;
+    return { accepted: true as const, clientNonce: record.clientNonce, provider };
+  };
 
   return {
     provider(): SandInferenceProvider { return settings.getInferenceProvider(); },
@@ -679,10 +735,17 @@ export function createCoordinatorInferenceRouter(options: {
         }
         const value = typeof record.value === "string" ? record.value.trim() : "";
         if (value.length === 0) return { handled: true, value: { accepted: false } };
-        const updated = updateLiveCard(agentId, entryId, { respondedValue: value }) ?? card;
-        if (updated != null) emitTranscript(agentId, "updated", { ...updated, respondedValue: value });
-        waiter?.settle({ status: "answered", value });
+        const message = asRecord(card?.message) ?? asRecord((liveCards.get(agentId) ?? []).find(row => row.id === entryId)?.message);
+        const stored = widgetReplyText(message?.widget, value);
+        const updated = updateLiveCard(agentId, entryId, { respondedValue: stored }) ?? card;
+        if (updated != null) emitTranscript(agentId, "updated", { ...updated, respondedValue: stored });
+        const hadWaiter = waiter != null;
+        waiter?.settle({ status: "answered", value: stored });
         widgetWaiters.delete(entryId);
+        if (provider !== "cursor") await persistWidgetAnswer(agentId, provider, stored);
+        if (!hadWaiter && provider !== "cursor") {
+          enqueueExecute(provider, { agentId, prompt: stored, persistUser: false }, false);
+        }
         return { handled: true, value: { accepted: true } };
       }
       if (method === "reactToMessage") {
@@ -721,22 +784,7 @@ export function createCoordinatorInferenceRouter(options: {
       }
       if (method !== "sendPrompt" || provider === "cursor") return { handled: false };
       const record = asRecord(args) ?? {};
-      const agentId = typeof record.agentId === "string" ? record.agentId : "";
-      if (agentId.length > 0) settleAgentWidgetsForNewPrompt(agentId);
-      const previous = queues.get(agentId) ?? Promise.resolve();
-      const next = previous.catch(() => undefined).then(() => execute(provider, record)).catch(async (error) => {
-        const timestampMs = now();
-        const content = `Router error: ${error instanceof Error ? error.message : String(error)}`;
-        if (agentId.length > 0) {
-          const id = `t${Date.now()}s0`;
-          await append(agentId, [{ provider, role: "assistant", content, id, timestampMs }]);
-          emitTranscript(agentId, "appended", { kind: "send-message", id, message: { type: "text", content }, timestampMs });
-        }
-      });
-      const queued = next.finally(() => { if (queues.get(agentId) === queued) queues.delete(agentId); });
-      queues.set(agentId, queued);
-      void queued;
-      return { handled: true, value: { accepted: true, clientNonce: record.clientNonce, provider } };
+      return { handled: true, value: enqueueExecute(provider, record, true) };
     },
   };
 }

@@ -192,7 +192,7 @@ function pluginTool(plugin, toolName) {
 
 async function waitFor(predicate, label) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    const value = predicate();
+    const value = await predicate();
     if (value) return value;
     await new Promise(resolve => setTimeout(resolve, 25));
   }
@@ -525,6 +525,92 @@ test("sendPrompt only auto-dismisses question cards with dismissOnMoveOn", async
     assert.equal(outcomes[0].dismissed, false);
     assert.match(outcomes[1].result, /dismissed the question/);
     assert.equal(outcomes[1].dismissed, true);
+  } finally {
+    await loaded.dispose();
+    await rmTree(dataDir);
+  }
+});
+
+test("answering a question card after the run finished starts a new user turn", async () => {
+  const loaded = await loadModule();
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-widget-resume-"));
+  const { writeFile } = await import("node:fs/promises");
+  const events = [];
+  const turns = [];
+  try {
+    await writeFile(path.join(dataDir, "settings.json"), JSON.stringify({
+      version: 1,
+      mcpBoxServers: [],
+      autoUpdateWhenIdleOptIn: false,
+      egressTunnelEnabled: false,
+      webauthnProxyEnabled: true,
+      mcpCustomInstructions: {},
+      mcpCustomInstructionsByServerId: {},
+      mcpDisabledToolsByServerId: {},
+      conciergeConsent: "unset",
+      settingsMigrations: [],
+      inferenceProvider: "grok",
+    }));
+    const router = loaded.module.createCoordinatorInferenceRouter({
+      dataDir,
+      composeDelayMs: 0,
+      permissionTimeoutMs: 80,
+      postEvent(_family, payload) { events.push(payload); },
+      dispatchRemote: async (method) => {
+        if (method === "listAgents") return [];
+        if (method === "getAgentTranscriptTail") return { entries: [] };
+        if (method === "listRoutedMcpTools") return [];
+        throw new Error(`unexpected ${method}`);
+      },
+      runProvider: async (_provider, messages, options) => {
+        turns.push(messages);
+        const lastUser = [...messages].reverse().find(message => message.role === "user");
+        if (lastUser?.content === "github") {
+          secondRunFinished = true;
+          return "resumed from github";
+        }
+        const pending = options.executeTool(options.tools.find(tool => tool.name === "AskQuestion"), {
+          prompt: "Which way do you want to go?",
+          options: [
+            { label: "GitHub Action", value: "github" },
+            { label: "UptimeRobot", value: "uptimerobot" },
+          ],
+        }, "call-ask");
+        await waitFor(
+          () => events.find(payload => payload?.entry?.message?.type === "widget")?.entry,
+          "expected a question card",
+        );
+        await pending;
+        firstRunFinished = true;
+        return "timed out";
+      },
+    });
+    const agentId = loaded.module.LOCAL_INFERENCE_AGENT_ID;
+    let firstRunFinished = false;
+    let secondRunFinished = false;
+    void router.dispatch("sendPrompt", { agentId, prompt: "watch the site" });
+    const widget = await waitFor(
+      () => events.find(payload => payload?.entry?.message?.type === "widget")?.entry,
+      "expected a question card before timeout",
+    );
+    await waitFor(() => firstRunFinished, "expected the first run to finish unanswered");
+    const answered = await router.dispatch("respondToWidget", { agentId, entryId: widget.id, value: "github" });
+    assert.equal(answered.handled, true);
+    assert.equal(answered.value.accepted, true);
+    await waitFor(() => secondRunFinished, "expected a new model turn from the widget answer");
+    const tail = await waitFor(async () => {
+      const result = await router.dispatch("getAgentTranscriptTail", { id: agentId });
+      const storedUser = result.value.entries.filter(entry => entry.role === "user" && entry.content === "github");
+      const resumed = result.value.entries.filter(entry =>
+        entry.kind === "send-message" && entry.message?.type === "text" && entry.message.content === "resumed from github"
+      );
+      return storedUser.length === 1 && resumed.length === 1 ? result : null;
+    }, "expected persisted github user turn and resumed assistant reply");
+    assert.equal(turns[1].filter(message => message.role === "user" && message.content === "github").length, 1);
+    assert.equal(tail.value.entries.filter(entry => entry.role === "user" && entry.content === "github").length, 1);
+    assert.equal(tail.value.entries.filter(entry =>
+      entry.kind === "send-message" && entry.message?.type === "text" && entry.message.content === "resumed from github"
+    ).length, 1);
   } finally {
     await loaded.dispose();
     await rmTree(dataDir);
