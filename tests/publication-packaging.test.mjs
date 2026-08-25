@@ -79,6 +79,8 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(rendererPatch, /Tracked activity/);
   assert.match(rendererPatch, /RRouterProviders\.filter/);
   assert.match(preload, /getInferenceRouter: \(\) => edge\("getInferenceRouter"\)/);
+  assert.match(preload, /getHostPinnedAgents: \(\) => edge\("getHostPinnedAgents"\)/);
+  assert.match(preload, /setHostPinnedAgents: \(payload: \{ readonly pinnedAgentIds: readonly string\[\] \}\) => edge\("setHostPinnedAgents", payload\)/);
   assert.match(preload, /getBoxRuntime: \(\) => edge\("getBoxRuntime"\)/);
   assert.match(preload, /pickComposerFilePayloads: async \(\) => \{/);
   assert.match(preload, /edge\("pickComposerFiles"\)/);
