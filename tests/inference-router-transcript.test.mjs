@@ -262,6 +262,30 @@ test("plugin permission identity keeps Gmail, Slack, and Linear separate", async
       { name: "user-Gmail--sales-list_labels", providerIdentifier: "user-Gmail--sales", toolName: "list_labels" },
     ]);
     assert.match(hint, /Gmail \(default, sales\)/);
+    assert.match(hint, /Ask which email or account to use before calling these tools/);
+    const emailed = loaded.module.pluginAccountsHint([
+      { name: "user-Gmail-list_labels", providerIdentifier: "user-Gmail", toolName: "list_labels", accountKey: "default", accountEmail: "pedro.pinho@alongside.team" },
+      { name: "user-Gmail--sales-list_labels", providerIdentifier: "user-Gmail--sales", toolName: "list_labels", accountKey: "sales", accountEmail: "sales@alongside.team" },
+    ]);
+    assert.match(emailed, /Gmail \(pedro\.pinho@alongside\.team, sales@alongside\.team\)/);
+    assert.match(emailed, /Ask which email or account to use before calling these tools/);
+    assert.match(loaded.module.routedCardsHint([]), /call AskQuestion so it renders as a question card/);
+    assert.doesNotMatch(loaded.module.routedCardsHint([]), /PromptConnectors/);
+    assert.match(loaded.module.routedCardsHint([pluginTool("gmail", "search_threads")]), /PromptConnectors/);
+    assert.deepEqual(loaded.module.filterUnconnectedConnectors(
+      ["Gmail", "Slack", "UptimeRobot", "gmail"],
+      [pluginTool("gmail", "search_threads"), pluginTool("slack", "post_message")],
+    ), ["UptimeRobot"]);
+    const parsed = loaded.module.parseAskQuestionArgs({
+      prompt: "Which way do you want to go?",
+      dismissOnMoveOn: true,
+      options: [
+        { label: "GitHub Action", value: "github", description: "Zero new connectors" },
+        { label: "UptimeRobot", value: "uptimerobot" },
+      ],
+    });
+    assert.equal(parsed.options.length, 2);
+    assert.equal(parsed.dismissOnMoveOn, true);
   } finally {
     await loaded.dispose();
   }
@@ -324,6 +348,183 @@ test("connected plugins run without a blocking Allow click", async () => {
     assert.match(permissionAsks[0].entry.message.approval.reason, /Using Gmail/);
     const connectors = events.filter(payload => payload?.type === "appended" && payload.entry?.message?.type === "connector");
     assert.equal(connectors.length, 0, "already-connected plugins must not prompt to add another account");
+  } finally {
+    await loaded.dispose();
+    await rmTree(dataDir);
+  }
+});
+
+test("AskQuestion waits for the question card and PromptConnectors skips connected emails", async () => {
+  const loaded = await loadModule();
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-prompt-cards-"));
+  const { writeFile } = await import("node:fs/promises");
+  const tools = [
+    { ...pluginTool("gmail", "search_threads"), accountEmail: "pedro.pinho@alongside.team" },
+    pluginTool("slack", "post_message"),
+  ];
+  const events = [];
+  try {
+    await writeFile(path.join(dataDir, "settings.json"), JSON.stringify({
+      version: 1,
+      mcpBoxServers: [],
+      autoUpdateWhenIdleOptIn: false,
+      egressTunnelEnabled: false,
+      webauthnProxyEnabled: true,
+      mcpCustomInstructions: {},
+      mcpCustomInstructionsByServerId: {},
+      mcpDisabledToolsByServerId: {},
+      conciergeConsent: "unset",
+      settingsMigrations: [],
+      inferenceProvider: "grok",
+    }));
+    const asked = [];
+    const router = loaded.module.createCoordinatorInferenceRouter({
+      dataDir,
+      composeDelayMs: 0,
+      permissionTimeoutMs: 2000,
+      postEvent(_family, payload) { events.push(payload); },
+      dispatchRemote: async (method) => {
+        if (method === "listAgents") return [];
+        if (method === "getAgentTranscriptTail") return { entries: [] };
+        if (method === "listRoutedMcpTools") return tools;
+        throw new Error(`unexpected ${method}`);
+      },
+      runProvider: async (_provider, messages, options) => {
+        assert.match(messages[0].content, /call AskQuestion so it renders as a question card/);
+        assert.match(messages[0].content, /PromptConnectors/);
+        const names = options.tools.map(tool => tool.name);
+        assert.ok(names.includes("AskQuestion"));
+        assert.ok(names.includes("PromptConnectors"));
+        const skipped = await options.executeTool(
+          options.tools.find(tool => tool.name === "PromptConnectors"),
+          { connectors: ["Gmail", "Slack"] },
+          "call-connected",
+        );
+        asked.push(skipped);
+        const pending = options.executeTool(
+          options.tools.find(tool => tool.name === "AskQuestion"),
+          {
+            prompt: "Which way do you want to go?",
+            options: [
+              { label: "GitHub Action", value: "github", description: "Hourly cron in alongside.website.v3" },
+              { label: "UptimeRobot", value: "uptimerobot", description: "Hosted monitor" },
+            ],
+          },
+          "call-ask",
+        );
+        const widget = await waitFor(
+          () => events.find(payload => payload?.type === "appended" && payload.entry?.message?.type === "widget")?.entry,
+          "expected a question card",
+        );
+        const answered = await router.dispatch("respondToWidget", {
+          agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID,
+          entryId: widget.id,
+          value: "github",
+        });
+        assert.equal(answered.handled, true);
+        assert.equal(answered.value.accepted, true);
+        asked.push(await pending);
+        asked.push(await options.executeTool(
+          options.tools.find(tool => tool.name === "PromptConnectors"),
+          { connectors: ["Gmail", "UptimeRobot"] },
+          "call-uptime",
+        ));
+        return "prompted with cards";
+      },
+    });
+    void router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "watch alongside.team hourly" });
+    await waitFor(() => asked.length === 3, "expected prompt tools to finish");
+    assert.match(JSON.stringify(asked[0]), /already connected/);
+    assert.match(JSON.stringify(asked[1]), /The user chose: github/);
+    assert.match(JSON.stringify(asked[2]), /UptimeRobot/);
+    const widgets = events.filter(payload => payload?.type === "appended" && payload.entry?.message?.type === "widget");
+    assert.equal(widgets.length, 1);
+    assert.equal(widgets[0].entry.message.widget.prompt, "Which way do you want to go?");
+    const connectors = events.filter(payload => payload?.entry?.message?.type === "connector" || payload?.entry?.message?.type === "connectors");
+    assert.equal(connectors.length, 1);
+    assert.equal(connectors[0].entry.message.connector, "UptimeRobot");
+    assert.equal(events.filter(payload => payload?.entry?.message?.type === "connector" && /gmail/i.test(payload.entry.message.connector)).length, 0);
+  } finally {
+    await loaded.dispose();
+    await rmTree(dataDir);
+  }
+});
+
+test("sendPrompt only auto-dismisses question cards with dismissOnMoveOn", async () => {
+  const loaded = await loadModule();
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-widget-dismiss-"));
+  const { writeFile } = await import("node:fs/promises");
+  const events = [];
+  const outcomes = [];
+  try {
+    await writeFile(path.join(dataDir, "settings.json"), JSON.stringify({
+      version: 1,
+      mcpBoxServers: [],
+      autoUpdateWhenIdleOptIn: false,
+      egressTunnelEnabled: false,
+      webauthnProxyEnabled: true,
+      mcpCustomInstructions: {},
+      mcpCustomInstructionsByServerId: {},
+      mcpDisabledToolsByServerId: {},
+      conciergeConsent: "unset",
+      settingsMigrations: [],
+      inferenceProvider: "grok",
+    }));
+    let phase = 0;
+    const router = loaded.module.createCoordinatorInferenceRouter({
+      dataDir,
+      composeDelayMs: 0,
+      permissionTimeoutMs: 2000,
+      postEvent(_family, payload) { events.push(payload); },
+      dispatchRemote: async (method) => {
+        if (method === "listAgents") return [];
+        if (method === "getAgentTranscriptTail") return { entries: [] };
+        if (method === "listRoutedMcpTools") return [];
+        throw new Error(`unexpected ${method}`);
+      },
+      runProvider: async (_provider, _messages, options) => {
+        phase += 1;
+        if (phase > 2) return "done";
+        const ask = options.tools.find(tool => tool.name === "AskQuestion");
+        if (phase === 1) {
+          const pending = options.executeTool(ask, {
+            prompt: "Stay live?",
+            options: [{ label: "Yes" }],
+          }, "call-live");
+          const widget = await waitFor(
+            () => events.find(payload => payload?.entry?.message?.widget?.prompt === "Stay live?")?.entry,
+            "expected a live question card",
+          );
+          void router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "typed instead" });
+          outcomes.push({
+            result: JSON.stringify(await pending),
+            dismissed: events.some(payload => payload?.entry?.id === widget.id && payload.entry.widgetDismissed === true),
+          });
+          return "kept live";
+        }
+        const pending = options.executeTool(ask, {
+          prompt: "Go away?",
+          dismissOnMoveOn: true,
+          options: [{ label: "Ok" }],
+        }, "call-dismiss");
+        const widget = await waitFor(
+          () => events.find(payload => payload?.entry?.message?.widget?.prompt === "Go away?")?.entry,
+          "expected a dismissOnMoveOn question card",
+        );
+        void router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "typed again" });
+        outcomes.push({
+          result: JSON.stringify(await pending),
+          dismissed: events.some(payload => payload?.entry?.id === widget.id && payload.entry.widgetDismissed === true),
+        });
+        return "dismissed";
+      },
+    });
+    void router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "first" });
+    await waitFor(() => outcomes.length === 2, "expected both widget sendPrompt outcomes");
+    assert.match(outcomes[0].result, /still live/);
+    assert.equal(outcomes[0].dismissed, false);
+    assert.match(outcomes[1].result, /dismissed the question/);
+    assert.equal(outcomes[1].dismissed, true);
   } finally {
     await loaded.dispose();
     await rmTree(dataDir);

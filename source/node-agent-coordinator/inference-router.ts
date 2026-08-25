@@ -2,12 +2,21 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
+import { zodToJsonSchema } from "zod-to-json-schema";
+
 import { runRoutedProviderText } from "../host/extensions/inference/provider-session.js";
 import type { SandInferenceProvider } from "../shared/inference-router.js";
 import { DEFAULT_MCP_ACCOUNT_KEY, emailFromPluginInput, lastEmailFromConversation, matchingConnectedAccountEmail } from "../shared/mcp.js";
+import { sandWidgetSchema, type SandWidget } from "../shared/sand-widgets.js";
 import { SandSettingsStore } from "../shared/node/settings/sand-settings-store.js";
 import { createPacedTextReveal } from "./paced-text-reveal.js";
 import { createRoutedMcpBridge } from "./routed-mcp-bridge.js";
+
+function jsonSchemaFromZod(schema: typeof sandWidgetSchema): Record<string, unknown> {
+  const json = zodToJsonSchema(schema, { $refStrategy: "none" }) as Record<string, unknown>;
+  const { $schema: _schema, ...rest } = json;
+  return rest;
+}
 
 type StoredEntry = {
   readonly provider: Exclude<SandInferenceProvider, "cursor">;
@@ -150,19 +159,95 @@ export function pluginPermissionLabel(
   };
 }
 
-export function pluginAccountsHint(tools: readonly Record<string, any>[]): string | null {
+export const ASK_QUESTION_TOOL_NAME = "AskQuestion";
+export const PROMPT_CONNECTORS_TOOL_NAME = "PromptConnectors";
+
+export function isRoutedPromptTool(tool?: { readonly name?: unknown; readonly toolName?: unknown } | null): boolean {
+  const name = typeof tool?.name === "string" ? tool.name.replace(/^mcp__grok_bot_plugins__/, "") : "";
+  const native = typeof tool?.toolName === "string" ? tool.toolName : "";
+  return name === ASK_QUESTION_TOOL_NAME || name === PROMPT_CONNECTORS_TOOL_NAME
+    || native === ASK_QUESTION_TOOL_NAME || native === PROMPT_CONNECTORS_TOOL_NAME;
+}
+
+export function routedPromptTools(): Record<string, any>[] {
+  return [
+    {
+      name: ASK_QUESTION_TOOL_NAME,
+      providerIdentifier: "alli",
+      toolName: ASK_QUESTION_TOOL_NAME,
+      description: "Ask the user a question with selectable options as a question card. Use this instead of listing choices in plain text. Sending this waits for their pick. Set dismissOnMoveOn only for low-stakes questions that should auto-dismiss if the user sends a newer message without answering.",
+      inputSchema: jsonSchemaFromZod(sandWidgetSchema),
+    },
+    {
+      name: PROMPT_CONNECTORS_TOOL_NAME,
+      providerIdentifier: "alli",
+      toolName: PROMPT_CONNECTORS_TOOL_NAME,
+      description: "Show in-chat connect cards for connectors the user still needs. Never include a connector that is already connected. One name shows a single connector card; several show a connectors list. Never paste a connect link or describe setup in plain text.",
+      inputSchema: {
+        type: "object",
+        required: ["connectors"],
+        properties: {
+          connectors: { type: "array", minItems: 1, items: { type: "string" } },
+          reason: { type: "string" },
+        },
+      },
+    },
+  ];
+}
+
+export function pluginAccountLabels(tools: readonly Record<string, any>[]): Map<string, string[]> {
   const byPlugin = new Map<string, string[]>();
   for (const tool of tools) {
+    if (isRoutedPromptTool(tool)) continue;
     const name = typeof tool.name === "string" ? tool.name : "";
     const { catalog, account } = pluginPermissionLabel(tool, name);
-    const key = account ?? "default";
+    const email = typeof tool.accountEmail === "string" && tool.accountEmail.includes("@") ? tool.accountEmail : null;
+    const key = email ?? account ?? "default";
     const list = byPlugin.get(catalog) ?? [];
     if (!list.includes(key)) list.push(key);
     byPlugin.set(catalog, list);
   }
+  return byPlugin;
+}
+
+export function pluginAccountsHint(tools: readonly Record<string, any>[]): string | null {
+  const byPlugin = pluginAccountLabels(tools);
   const multi = [...byPlugin.entries()].filter(([, accounts]) => accounts.length > 1);
   if (multi.length === 0) return null;
   return `Connected plugin accounts: ${multi.map(([plugin, accounts]) => `${plugin} (${accounts.join(", ")})`).join("; ")}. Ask which email or account to use before calling these tools. After the user answers, use that account.`;
+}
+
+export function routedCardsHint(tools: readonly Record<string, any>[] = []): string {
+  const lines = ["When you need a decision, call AskQuestion so it renders as a question card. Never list options in plain text."];
+  if (tools.length > 0) {
+    lines.push("When a needed connector is not already connected, call PromptConnectors so the user gets a connect card. Never paste connect links in plain text.");
+  }
+  const accounts = pluginAccountsHint(tools);
+  if (accounts != null) lines.push(accounts);
+  return lines.join("\n");
+}
+
+export function filterUnconnectedConnectors(connectors: readonly unknown[], tools: readonly Record<string, any>[]): string[] {
+  const connected = new Set([...pluginAccountLabels(tools).keys()].map(name => name.toLowerCase()));
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of connectors) {
+    if (typeof raw !== "string") continue;
+    const name = raw.trim();
+    if (name.length === 0) continue;
+    const catalog = pluginPermissionLabel({ providerIdentifier: name }, name).catalog.toLowerCase();
+    const key = name.toLowerCase();
+    if (connected.has(key) || connected.has(catalog)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(name);
+  }
+  return result;
+}
+
+export function parseAskQuestionArgs(args: unknown): SandWidget | null {
+  const parsed = sandWidgetSchema.safeParse(args);
+  return parsed.success ? parsed.data : null;
 }
 
 function pluginPermissionResolution(value: unknown): string {
@@ -276,9 +361,26 @@ export function createCoordinatorInferenceRouter(options: {
   const now = options.now ?? Date.now;
   const queues = new Map<string, Promise<unknown>>();
   const pluginPermissionWaiters = new Map<string, (resolution: string) => void>();
+  type WidgetWait = { readonly status: "answered"; readonly value: string } | { readonly status: "dismissed" } | { readonly status: "timeout" } | { readonly status: "moved-on" };
+  const widgetWaiters = new Map<string, { readonly agentId: string; readonly dismissOnMoveOn: boolean; settle(result: WidgetWait): void }>();
   const sessionAllowedPlugins = new Set<string>();
   const sessionDeniedPlugins = new Set<string>();
   const liveCards = new Map<string, Record<string, unknown>[]>();
+  const updateLiveCard = (agentId: string, entryId: string, patch: Record<string, unknown>): Record<string, unknown> | null => {
+    const rows = liveCards.get(agentId) ?? [];
+    const index = rows.findIndex(row => row.id === entryId);
+    if (index < 0) return null;
+    const updated = { ...rows[index], ...patch };
+    rows[index] = updated;
+    liveCards.set(agentId, rows);
+    return updated;
+  };
+  const findLiveCardAgent = (entryId: string): string | null => {
+    for (const [agentId, rows] of liveCards) {
+      if (rows.some(row => row.id === entryId)) return agentId;
+    }
+    return null;
+  };
 
   const upsertLiveCard = (agentId: string, entry: Record<string, unknown>) => {
     const rows = liveCards.get(agentId) ?? [];
@@ -309,6 +411,19 @@ export function createCoordinatorInferenceRouter(options: {
     return next;
   };
   const emitTranscript = (agentId: string, type: "appended" | "updated", entry: Record<string, unknown>) => options.postEvent("transcript", { type, entry, agentId });
+  const settleAgentWidgetsForNewPrompt = (agentId: string) => {
+    for (const [entryId, waiter] of [...widgetWaiters]) {
+      if (waiter.agentId !== agentId) continue;
+      widgetWaiters.delete(entryId);
+      if (waiter.dismissOnMoveOn) {
+        const updated = updateLiveCard(agentId, entryId, { widgetDismissed: true });
+        if (updated != null) emitTranscript(agentId, "updated", updated);
+        waiter.settle({ status: "dismissed" });
+      } else {
+        waiter.settle({ status: "moved-on" });
+      }
+    }
+  };
   const beginActivity = async (agentId: string): Promise<() => void> => {
     try {
       const remote = await options.dispatchRemote("listAgents", {});
@@ -399,8 +514,55 @@ export function createCoordinatorInferenceRouter(options: {
     let listedTools: Record<string, any>[] = [];
     try { listedTools = routedPluginToolRows(await options.dispatchRemote("listRoutedMcpTools", {})); }
     catch { listedTools = []; }
-    const accountHint = pluginAccountsHint(listedTools);
-    const routedMessages = accountHint == null ? messages : [{ role: "system", content: accountHint }, ...messages];
+    const promptTools = routedPromptTools();
+    const toolsForModel = [...promptTools, ...listedTools];
+    const routedMessages = [{ role: "system", content: routedCardsHint(listedTools) }, ...messages];
+    const executePromptTool = async (definition: Record<string, any>, toolArgs: unknown): Promise<string> => {
+      const toolName = typeof definition.toolName === "string" && definition.toolName.length > 0
+        ? definition.toolName
+        : typeof definition.name === "string" ? definition.name.replace(/^mcp__grok_bot_plugins__/, "") : "";
+      if (toolName === ASK_QUESTION_TOOL_NAME) {
+        const widget = parseAskQuestionArgs(toolArgs);
+        if (widget == null) return "AskQuestion needs a prompt and 1-6 options with labels.";
+        const entryId = `t${turn}w${randomUUID().slice(0, 8)}`;
+        const entry = {
+          kind: "send-message",
+          id: entryId,
+          message: { type: "widget", widget },
+          timestampMs: now(),
+        };
+        upsertLiveCard(agentId, entry);
+        emitTranscript(agentId, "appended", entry);
+        const result = await new Promise<WidgetWait>(resolve => {
+          schedule(() => {
+            if (!widgetWaiters.has(entryId)) return;
+            widgetWaiters.delete(entryId);
+            resolve({ status: "timeout" });
+          }, permissionTimeoutMs);
+          widgetWaiters.set(entryId, { agentId, dismissOnMoveOn: widget.dismissOnMoveOn === true, settle: resolve });
+        });
+        if (result.status === "answered") return `The user chose: ${result.value}`;
+        if (result.status === "dismissed") return "The user dismissed the question.";
+        if (result.status === "moved-on") return "The user sent a new message. The question card is still live.";
+        return "The user didn't answer.";
+      }
+      const record = asRecord(toolArgs) ?? {};
+      const needed = filterUnconnectedConnectors(Array.isArray(record.connectors) ? record.connectors : [], listedTools);
+      if (needed.length === 0) {
+        return "Those connectors are already connected. Use the existing accounts and emails by default. Do not ask the user to add them again.";
+      }
+      const reason = typeof record.reason === "string" && record.reason.trim().length > 0 ? record.reason.trim() : undefined;
+      const entryId = `t${turn}c${randomUUID().slice(0, 8)}`;
+      const message = needed.length === 1
+        ? { type: "connector", connector: needed[0], variant: "connect", ...(reason == null ? {} : { reason }) }
+        : { type: "connectors", connectors: needed };
+      const entry = { kind: "send-message", id: entryId, message, timestampMs: now() };
+      upsertLiveCard(agentId, entry);
+      emitTranscript(agentId, "appended", entry);
+      return needed.length === 1
+        ? `Showed a connect card for ${needed[0]}. Wait for the user to connect.`
+        : `Showed connect cards for ${needed.join(", ")}. Wait for the user to connect.`;
+    };
     const askPluginPermission = async (toolName: string, input: Record<string, unknown>, definition?: Record<string, unknown> | null) => {
       const resolved = resolveRoutedPluginTool(toolName, listedTools, definition);
       const identity = pluginPermissionIdentity(toolName, resolved);
@@ -432,6 +594,12 @@ export function createCoordinatorInferenceRouter(options: {
       const toolName = typeof definition.name === "string" && definition.name.length > 0
         ? definition.name
         : typeof definition.toolName === "string" ? definition.toolName : "plugin";
+      if (isRoutedPromptTool(definition) || toolName === ASK_QUESTION_TOOL_NAME || toolName === PROMPT_CONNECTORS_TOOL_NAME
+        || toolName.replace(/^mcp__grok_bot_plugins__/, "") === ASK_QUESTION_TOOL_NAME
+        || toolName.replace(/^mcp__grok_bot_plugins__/, "") === PROMPT_CONNECTORS_TOOL_NAME) {
+        const text = await executePromptTool(definition, toolArgs);
+        return { result: { case: "success", value: { content: [{ content: { case: "text", value: { text } } }] } } };
+      }
       const decision = await askPluginPermission(toolName, asRecord(toolArgs) ?? {}, asRecord(definition));
       if (decision.behavior !== "allow") throw new Error(decision.message ?? "The user denied this Alli Bot plugin.");
       return await options.dispatchRemote("executeRoutedMcpTool", {
@@ -444,7 +612,7 @@ export function createCoordinatorInferenceRouter(options: {
       });
     };
     const bridge = provider === "claude-code" ? await createRoutedMcpBridge({
-      listTools: async () => listedTools,
+      listTools: async () => toolsForModel,
       callTool: async tool => {
         try { return await executePluginTool(tool, tool.args, tool.toolCallId); }
         catch (error) { return { result: { case: "error", value: { error: error instanceof Error ? error.message : String(error) } } }; }
@@ -462,7 +630,7 @@ export function createCoordinatorInferenceRouter(options: {
     };
     try {
       content = await runProvider(provider, routedMessages, bridge == null ? {
-        tools: listedTools,
+        tools: toolsForModel,
         executeTool: async (definition, toolArgs, toolCallId) => await executePluginTool(definition, toolArgs, toolCallId),
         onTextDelta,
         agentId,
@@ -491,6 +659,31 @@ export function createCoordinatorInferenceRouter(options: {
           waiter(pluginPermissionResolution(record.resolution));
           return { handled: true, value: undefined };
         }
+      }
+      if (method === "respondToWidget" || method === "dismissWidget") {
+        const record = asRecord(args) ?? {};
+        const entryId = typeof record.entryId === "string" ? record.entryId : "";
+        const agentId = typeof record.agentId === "string" && record.agentId.length > 0
+          ? record.agentId
+          : findLiveCardAgent(entryId) ?? "";
+        if (entryId.length === 0 || agentId.length === 0) return { handled: false };
+        const waiter = widgetWaiters.get(entryId);
+        const card = (liveCards.get(agentId) ?? []).find(row => row.id === entryId);
+        if (waiter == null && card == null) return { handled: false };
+        if (method === "dismissWidget") {
+          const updated = updateLiveCard(agentId, entryId, { widgetDismissed: true }) ?? card;
+          if (updated != null) emitTranscript(agentId, "updated", updated);
+          waiter?.settle({ status: "dismissed" });
+          widgetWaiters.delete(entryId);
+          return { handled: true, value: { accepted: true } };
+        }
+        const value = typeof record.value === "string" ? record.value.trim() : "";
+        if (value.length === 0) return { handled: true, value: { accepted: false } };
+        const updated = updateLiveCard(agentId, entryId, { respondedValue: value }) ?? card;
+        if (updated != null) emitTranscript(agentId, "updated", { ...updated, respondedValue: value });
+        waiter?.settle({ status: "answered", value });
+        widgetWaiters.delete(entryId);
+        return { handled: true, value: { accepted: true } };
       }
       if (method === "reactToMessage") {
         const record = asRecord(args) ?? {};
@@ -529,6 +722,7 @@ export function createCoordinatorInferenceRouter(options: {
       if (method !== "sendPrompt" || provider === "cursor") return { handled: false };
       const record = asRecord(args) ?? {};
       const agentId = typeof record.agentId === "string" ? record.agentId : "";
+      if (agentId.length > 0) settleAgentWidgetsForNewPrompt(agentId);
       const previous = queues.get(agentId) ?? Promise.resolve();
       const next = previous.catch(() => undefined).then(() => execute(provider, record)).catch(async (error) => {
         const timestampMs = now();
