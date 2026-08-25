@@ -373,7 +373,7 @@ export function createCoordinatorInferenceRouter(options: {
   const storePath = join(options.dataDir, "inference-router-transcript.json");
   const now = options.now ?? Date.now;
   const queues = new Map<string, Promise<unknown>>();
-  const pluginPermissionWaiters = new Map<string, (resolution: string) => void>();
+  const pluginPermissionWaiters = new Map<string, { readonly agentId: string; settle(resolution: string): void }>();
   type WidgetWait = { readonly status: "answered"; readonly value: string } | { readonly status: "dismissed" } | { readonly status: "timeout" } | { readonly status: "moved-on" };
   const widgetWaiters = new Map<string, { readonly agentId: string; readonly dismissOnMoveOn: boolean; settle(result: WidgetWait): void }>();
   const sessionAllowedPlugins = new Set<string>();
@@ -425,6 +425,14 @@ export function createCoordinatorInferenceRouter(options: {
   };
   const emitTranscript = (agentId: string, type: "appended" | "updated", entry: Record<string, unknown>) => options.postEvent("transcript", { type, entry, agentId });
   const settleAgentWidgetsForNewPrompt = (agentId: string) => {
+    // A pending permission blocks this agent's queue. If the user answers by
+    // typing instead of clicking, release it as expired rather than leaving the
+    // turn wedged until the timeout - and never as an allow.
+    for (const [requestId, waiter] of [...pluginPermissionWaiters]) {
+      if (waiter.agentId !== agentId) continue;
+      pluginPermissionWaiters.delete(requestId);
+      waiter.settle("expired");
+    }
     for (const [entryId, waiter] of [...widgetWaiters]) {
       if (waiter.agentId !== agentId) continue;
       widgetWaiters.delete(entryId);
@@ -588,12 +596,15 @@ export function createCoordinatorInferenceRouter(options: {
       const permission = pluginPermissionLabel(resolved, toolName, input, messages, listedTools);
       if (sessionDeniedPlugins.has(identity.key)) return { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
       if (sessionAllowedPlugins.has(identity.key)) return { behavior: "allow" as const, updatedInput: input };
-      sessionAllowedPlugins.add(identity.key);
       const requestId = randomUUID();
       const entryId = `t${turn}p${requestId.slice(0, 8)}`;
+      // status must be "pending": the renderer only enables Allow/Deny while it
+      // is, and showed a static "Allowed once" badge for the hardcoded
+      // "approved" this used to send. No proposedRule either - with one present
+      // the renderer's "Always allow" awaits a rule lookup before settling.
       const approval = {
         requestId,
-        status: "approved",
+        status: "pending",
         surface: "mcp",
         summary: permission.label,
         reason: `Using ${permission.label}.`,
@@ -605,9 +616,30 @@ export function createCoordinatorInferenceRouter(options: {
         message: { type: "auto-review-approval", approval },
         timestampMs: now(),
       };
+      // Register before the card goes out. Emitting first leaves a window where
+      // a settlement that arrives immediately finds no waiter and is dropped.
+      const settlement = new Promise<string>(resolve => {
+        schedule(() => { if (pluginPermissionWaiters.delete(requestId)) resolve("expired"); }, permissionTimeoutMs);
+        pluginPermissionWaiters.set(requestId, { agentId, settle: resolve });
+      });
       upsertLiveCard(agentId, approvalEntry);
       emitTranscript(agentId, "appended", approvalEntry);
-      return { behavior: "allow" as const, updatedInput: input };
+      const resolution = await settlement;
+      pluginPermissionWaiters.delete(requestId);
+      const allow = resolution === "allow-once" || resolution === "always";
+      if (resolution === "always") sessionAllowedPlugins.add(identity.key);
+      if (resolution === "never") sessionDeniedPlugins.add(identity.key);
+      // Settled cards must use the renderer's vocabulary - it renders anything
+      // else as "Status unavailable" - and must be emitted, or its optimistic
+      // override lingers and a later refetch shows a stale pending card.
+      const status = resolution === "always" ? "always"
+        : resolution === "allow-once" ? "approved"
+        : resolution === "expired" ? "expired"
+        : "denied";
+      const settled = updateLiveCard(agentId, entryId, { message: { type: "auto-review-approval", approval: { ...approval, status } } });
+      if (settled != null) emitTranscript(agentId, "updated", settled);
+      if (allow) return { behavior: "allow" as const, updatedInput: input };
+      return { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
     };
     const executePluginTool = async (definition: Record<string, any>, toolArgs: unknown, toolCallId: string) => {
       const toolName = typeof definition.name === "string" && definition.name.length > 0
@@ -715,7 +747,8 @@ export function createCoordinatorInferenceRouter(options: {
         const requestId = typeof record.requestId === "string" ? record.requestId : "";
         const waiter = pluginPermissionWaiters.get(requestId);
         if (waiter != null) {
-          waiter(pluginPermissionResolution(record.resolution));
+          pluginPermissionWaiters.delete(requestId);
+          waiter.settle(pluginPermissionResolution(record.resolution));
           return { handled: true, value: undefined };
         }
       }
