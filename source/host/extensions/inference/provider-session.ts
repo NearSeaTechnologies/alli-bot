@@ -58,6 +58,7 @@ function grokRouterSystemPrompt(agentId?: string): string {
     `You are running inside ${SAND_PRODUCT_DISPLAY_NAME} as this teammate, not inside Codex CLI or Claude Code.`,
     `The tools supplied with this request are ${SAND_PRODUCT_DISPLAY_NAME}'s already-connected plugins and accounts.`,
     "If a plugin has more than one connected account, or the user did not name which email to use, ask which email or account before calling its tools. After they answer, use that account and include the address in the tool arguments when possible.",
+    "When you need a decision, call AskQuestion so it renders as a question card. When a needed connector is not already connected, call PromptConnectors so the user gets a connect card. Never list options or paste connect links in plain text.",
     "Do not ask the user to add or reconnect an account that is already connected. Never ask for an API key for an already-connected plugin.",
   ].join("\n");
 }
