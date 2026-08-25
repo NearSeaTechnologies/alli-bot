@@ -465,7 +465,8 @@ export function createCoordinatorInferenceRouter(options: {
         tools: listedTools,
         executeTool: async (definition, toolArgs, toolCallId) => await executePluginTool(definition, toolArgs, toolCallId),
         onTextDelta,
-      } : { mcpServerUrl: bridge.url, onTextDelta, canUseTool });
+        agentId,
+      } : { mcpServerUrl: bridge.url, onTextDelta, canUseTool, agentId });
       reveal.push("", content);
       content = await reveal.finish();
     } catch (error) {
