@@ -404,7 +404,10 @@ export function createCoordinatorInferenceRouter(options: {
   };
   const runProvider = options.runProvider ?? runRoutedProviderText;
   const composeDelayMs = options.composeDelayMs ?? 80;
-  const permissionTimeoutMs = options.permissionTimeoutMs ?? 5 * 60 * 1000;
+  // A five minute wait meant an unnoticed approval card stalled the whole turn
+  // and the user got no reply at all - the worst possible failure. Fail fast
+  // enough that the agent can still say something useful in the same turn.
+  const permissionTimeoutMs = options.permissionTimeoutMs ?? 45_000;
   const schedule = options.schedule ?? setTimeout;
 
   const load = async (): Promise<Store> => {
@@ -639,7 +642,12 @@ export function createCoordinatorInferenceRouter(options: {
       const settled = updateLiveCard(agentId, entryId, { message: { type: "auto-review-approval", approval: { ...approval, status } } });
       if (settled != null) emitTranscript(agentId, "updated", settled);
       if (allow) return { behavior: "allow" as const, updatedInput: input };
-      return { behavior: "deny" as const, message: "The user denied this Alli Bot plugin." };
+      // Distinguish "the user said no" from "nobody answered the card", so the
+      // model can tell the user what to do instead of reporting a refusal.
+      const message = resolution === "expired"
+        ? `The approval card for ${permission.label} is still waiting. Tell the user to click Allow on it, then try again.`
+        : "The user denied this Alli Bot plugin.";
+      return { behavior: "deny" as const, message };
     };
     const executePluginTool = async (definition: Record<string, any>, toolArgs: unknown, toolCallId: string) => {
       const toolName = typeof definition.name === "string" && definition.name.length > 0
