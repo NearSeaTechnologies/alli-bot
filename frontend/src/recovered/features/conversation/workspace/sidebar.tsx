@@ -313,8 +313,19 @@ export function SidebarResizeHandle({ onResize, onResizeEnd }: SidebarResizeHand
     target.setPointerCapture(pointerId);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
+    // Coalesce pointer moves onto one animation frame. Calling onResize per event
+    // pushed a root state update per pointermove, re-rendering the whole tree
+    // (transcript included) many times per frame while dragging.
+    let moveFrame = 0;
+    let latestClientX = 0;
+    const flushMove = () => {
+      moveFrame = 0;
+      onResize(latestClientX - startLeft.current);
+    };
     const onMove = (moveEvent: globalThis.PointerEvent) => {
-      if (moveEvent.pointerId === pointerId) onResize(moveEvent.clientX - startLeft.current);
+      if (moveEvent.pointerId !== pointerId) return;
+      latestClientX = moveEvent.clientX;
+      if (moveFrame === 0) moveFrame = requestAnimationFrame(flushMove);
     };
     const onKeyDown = (keyEvent: KeyboardEvent) => {
       if (keyEvent.key === "Escape") cleanup();
@@ -322,6 +333,11 @@ export function SidebarResizeHandle({ onResize, onResizeEnd }: SidebarResizeHand
     function cleanup() {
       if (cleanupRef.current !== cleanup) return;
       cleanupRef.current = null;
+      // Commit the last pointer position instead of dropping a pending frame.
+      if (moveFrame !== 0) {
+        cancelAnimationFrame(moveFrame);
+        flushMove();
+      }
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", cleanup);
       window.removeEventListener("pointercancel", cleanup);

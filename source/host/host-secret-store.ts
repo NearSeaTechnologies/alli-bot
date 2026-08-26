@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { getHostSecretsPath } from "./host-paths.js";
@@ -28,8 +28,12 @@ export async function readMachineId(path: string): Promise<string | null> {
 export async function writeMachineId(path: string, machineId: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tempPath = `${path}.${process.pid}.tmp`;
-  await writeFile(tempPath, JSON.stringify({ machineId }, null, 2), "utf8");
+  // Written with the default umask this landed world-readable, unlike its
+  // sibling box-secrets.json. Owner-only, and restate the mode afterwards so a
+  // file inherited from an older build is tightened too.
+  await writeFile(tempPath, JSON.stringify({ machineId }, null, 2), { encoding: "utf8", mode: 0o600 });
   await rename(tempPath, path);
+  try { await chmod(path, 0o600); } catch {}
 }
 
 /** Test-only reset; production never clears the process-global machine identity. */

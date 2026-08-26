@@ -41,13 +41,22 @@ export const SSE_STALL_TIMEOUT_MS = 35_000;
 export const SSE_CONNECT_TIMEOUT_MS = 15_000;
 export const SEND_POST_TIMEOUT_MS = 15_000;
 export const ROSTER_READ_TIMEOUT_MS = 15_000;
+/** Deleting an agent must always settle: the confirmation dialog waits on this promise. */
+export const AGENT_DELETE_TIMEOUT_MS = 45_000;
 export const TRACE_WINDOW_ROOT_CACHE_MS = 5_000;
 export const HOST_ACCOUNT_SLOT = "host";
 
 const DISABLE_SEND_ACCEPT_RETURN_ENV = "SAND_DISABLE_SEND_ACCEPT_RETURN";
 const SEND_POST_TIMEOUT_ENV = "SAND_SEND_POST_TIMEOUT_MS";
+const AGENT_DELETE_TIMEOUT_ENV = "SAND_AGENT_DELETE_TIMEOUT_MS";
 const ROSTER_READ_TIMEOUT_ENV = "SAND_ROSTER_READ_TIMEOUT_MS";
 const DISABLE_SLIM_AVATARS_ENV = "SAND_DISABLE_SLIM_AVATARS";
+
+/** Deletion deadline, overridable so tests do not have to wait the full timeout. */
+export function agentDeleteTimeoutMs(): number {
+  const override = Number(process.env[AGENT_DELETE_TIMEOUT_ENV]);
+  return Number.isFinite(override) && override > 0 ? override : AGENT_DELETE_TIMEOUT_MS;
+}
 
 export function extractGatewayErrorMessage(body: string): string | null {
   try {
@@ -292,6 +301,7 @@ export class CoordinatorGatewayClient {
     if (method === "sendPrompt") return this.sendPrompt(record);
     if (method === "getForeverBoxStatus" || method === "ensureForeverBox") return this.foreverBoxStatusCommand(method, args, init);
     if (method === "listAgents" || method === "countAgents") return this.boundedRosterRead(method, init);
+    if (method === "deleteAgent" || method === "deleteAgents") return this.boundedAgentDelete(method, args, init);
     if (method === "createAgent") return this.createAgentWithRetry(record, init);
     if (method === "setDevGatewayOffline") return Promise.resolve(this.setDevInducedOffline(record.induced === true));
     if (method === "setGatewayPaused") return Promise.resolve(this.setClientPaused(record.paused === true));
@@ -326,6 +336,27 @@ export class CoordinatorGatewayClient {
   }
 
   private noteTransportRetry(): void { try { this.options.onTransportRetry?.(); } catch {} }
+
+  /**
+   * Agent deletion had no deadline: it fell through to a bare fetch, so a slow or
+   * wedged host left the promise pending forever and the delete-confirmation
+   * dialog sat there with no result and no error. Always settle.
+   */
+  private async boundedAgentDelete(method: string, args: unknown, init?: RequestInit): Promise<unknown> {
+    const timeoutMs = agentDeleteTimeoutMs();
+    const deadline = AbortSignal.timeout(timeoutMs);
+    const signal = init?.signal == null ? deadline : AbortSignal.any([init.signal, deadline]);
+    try {
+      return await this.command(method, args, { ...init, signal });
+    } catch (error) {
+      if (!deadline.aborted) throw error;
+      throw new SandGatewayUnreachableError(
+        "timeout",
+        `gateway ${method} did not finish within ${timeoutMs}ms; the agent may still be removed on the computer`,
+        { cause: error },
+      );
+    }
+  }
 
   private async boundedRosterRead(method: string, init?: RequestInit): Promise<unknown> {
     try { return await this.boundedRosterReadAttempt(method, init); }

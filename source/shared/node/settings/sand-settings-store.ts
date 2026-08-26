@@ -90,6 +90,23 @@ function parseSettings(value: unknown): SandStoredSettings | null {
   return result;
 }
 
+function normalizeNotificationConfig(raw: unknown): typeof SAND_DISABLED_NOTIFICATION_CONFIG {
+  const base = SAND_DISABLED_NOTIFICATION_CONFIG;
+  if (typeof raw !== "object" || raw == null || Array.isArray(raw)) return { ...base };
+  const record = raw as Record<string, unknown>;
+  const count = (key: keyof typeof base, minimum: number): number => {
+    const value = record[key as string];
+    return typeof value === "number" && Number.isFinite(value) && value >= minimum ? Math.floor(value) : (base[key] as number);
+  };
+  return {
+    isEnabled: record.isEnabled === true,
+    allowedApps: Array.isArray(record.allowedApps) ? record.allowedApps.filter((item): item is string => typeof item === "string") : [...base.allowedApps],
+    minIntervalMs: count("minIntervalMs", 0),
+    maxPerWindow: count("maxPerWindow", 1),
+    windowMs: count("windowMs", 1_000),
+  };
+}
+
 export class SandSettingsStore {
   constructor(readonly settingsPath: string) {}
   load(): SandStoredSettings {
@@ -156,8 +173,20 @@ export class SandSettingsStore {
   deleteMcpCustomInstructionByServerId(args: { serverId: string; displayName: string; deleteLegacyName: boolean }): void { this.update((s) => { const byId = { ...s.mcpCustomInstructionsByServerId }; delete byId[args.serverId]; const legacy = { ...s.mcpCustomInstructions }; if (args.deleteLegacyName) delete legacy[args.displayName]; return { ...s, mcpCustomInstructionsByServerId: byId, mcpCustomInstructions: legacy }; }); }
   setMcpCustomInstruction(name: string, value: string): void { this.update((s) => { const next = { ...s.mcpCustomInstructions }; const clamped = clampMcpCustomInstruction(value); if (clamped.trim().length === 0) { if (getDefaultMcpCustomInstruction(name).length > 0) next[name] = ""; else delete next[name]; } else next[name] = clamped; return { ...s, mcpCustomInstructions: next }; }); }
   deleteMcpCustomInstruction(name: string): void { const current = this.load(); if (!(name in current.mcpCustomInstructions)) return; const next = { ...current.mcpCustomInstructions }; delete next[name]; this.persist({ ...current, mcpCustomInstructions: next }); }
-  getNotificationConfig() { const current = this.load(); if (current.notifications?.isEnabled !== false || Object.keys(current.notifications).length !== 1) this.persist({ ...current, notifications: { isEnabled: false } }); return SAND_DISABLED_NOTIFICATION_CONFIG; }
-  setNotificationConfig(_input: unknown): void { this.update((s) => ({ ...s, notifications: { isEnabled: false } })); }
+  /**
+   * These used to be a hard stub: the getter overwrote whatever was on disk with
+   * `{ isEnabled: false }` and returned the disabled constant, and the setter
+   * ignored its argument entirely, so the notification settings could never be
+   * changed by anything. Now the stored value is honoured, defaulting to the
+   * disabled shape so behaviour only changes once something opts in.
+   */
+  getNotificationConfig(): typeof SAND_DISABLED_NOTIFICATION_CONFIG {
+    return normalizeNotificationConfig(this.load().notifications);
+  }
+  setNotificationConfig(input: unknown): void {
+    const next = normalizeNotificationConfig(input);
+    this.update((s) => ({ ...s, notifications: { ...next } }));
+  }
   getAutoReviewInstructions(): SandAutoReviewInstructions { return this.load().autoReviewInstructions ?? DEFAULT_SAND_AUTO_REVIEW_INSTRUCTIONS; }
   setAutoReviewInstructions(value: SandAutoReviewInstructions): void { const normalized = normalizeSandAutoReviewInstructions(value); this.update((s) => { const { autoReviewInstructions: _old, ...rest } = s; return normalized.isEnabled && normalized.allowInstructions.length === 0 && normalized.blockInstructions.length === 0 ? rest : { ...rest, autoReviewInstructions: normalized }; }); }
   getLocalToolPermission(): SandLocalToolPermission { const s = this.load(); return resolveSandLocalToolPermission(s.localToolPermission ?? SAND_DEFAULT_LOCAL_TOOL_PERMISSION, s.localToolPermissionCeiling); }

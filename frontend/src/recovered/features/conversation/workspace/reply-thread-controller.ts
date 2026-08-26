@@ -149,7 +149,10 @@ export function createReplyThreadController(options: ReplyThreadControllerOption
       return resolution;
     },
     applyReplyToDraft(draft) {
-      if (selection == null || !sameScope(selection.scope, scope)) return { ...draft };
+      // Return the draft unchanged rather than a fresh copy: spreading here gave
+      // the draft a new identity on every render, which defeats memoization of
+      // everything downstream of it.
+      if (selection == null || !sameScope(selection.scope, scope)) return draft;
       return { ...draft, replyToId: selection.targetId };
     },
     clearReplyFromDraft(draft) {

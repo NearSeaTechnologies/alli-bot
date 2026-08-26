@@ -59,3 +59,19 @@ test("reconstructed production stylesheet does not double-apply the overlay", as
   const source = await readFile(path.join(repoRoot, "frontend", "src", "production", "production.css"), "utf8");
   assert.doesNotMatch(source, /@import url\("\.\/motion-024\.css"\)/);
 });
+
+test("0.24 motion overlay does not override the host renderer's own enter and exit motion", async () => {
+  const css = await readFile(path.join(repoRoot, "frontend/src/production/motion-024.css"), "utf8");
+  // The overlay is injected into every document, including the original Grok Bot
+  // bundle, which drives these attributes with its own transitions. Declaring them
+  // here layered a second animation on top and made popovers animate twice.
+  const declarations = css.replace(/@media[^{]*\{[\s\S]*?\n\}/g, "");
+  assert.doesNotMatch(declarations, /^\[data-starting-style\]/m);
+  assert.doesNotMatch(declarations, /^\[data-ending-style\]/m);
+  assert.doesNotMatch(declarations, /^\[role="menu"\]/m);
+  assert.doesNotMatch(declarations, /^\[role="listbox"\]/m);
+  assert.doesNotMatch(declarations, /^\[role="dialog"\]/m);
+  // The additive tokens and press feedback must stay.
+  assert.match(css, /--ui-press-scale: \.98/);
+  assert.match(css, /prefers-reduced-motion: reduce/);
+});

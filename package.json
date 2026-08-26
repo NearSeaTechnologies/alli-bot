@@ -25,6 +25,7 @@
     "postinstall": "node scripts/apply-third-party-patches.mjs",
     "smoke": "node scripts/smoke.mjs",
     "test": "node --test tests/*.test.mjs",
+    "bench:reveal": "node scripts/bench-paced-reveal.mjs",
     "typecheck": "tsc --project frontend/tsconfig.json",
     "source:typecheck": "tsc --project source/tsconfig.json",
     "verify": "node scripts/verify.mjs"

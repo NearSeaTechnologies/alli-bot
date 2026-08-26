@@ -46,6 +46,11 @@ export function buildApplicationMenuTemplate(
     template.push({
       label: electron.appName,
       submenu: [
+        // The original app menu had About here. It was dropped, and the account
+        // menu item was nulled too, so the About dialog became unreachable even
+        // though emitOpenAbout and its handler were still wired.
+        { label: `About ${electron.appName}`, click: () => options.emitOpenAbout() },
+        { type: "separator" },
         { role: "services" },
         { type: "separator" },
         { role: "hide" },
@@ -99,6 +104,8 @@ export function buildApplicationMenuTemplate(
           void electron.openExternal("https://cursor.com/help");
         },
       },
+      { type: "separator" },
+      { label: "Send Feedback", click: () => options.emitOpenFeedback() },
     ],
   });
   return template;

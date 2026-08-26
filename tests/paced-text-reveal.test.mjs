@@ -55,3 +55,35 @@ test("paced reveal emits an empty streaming start then settles without dumping t
     await loaded.dispose();
   }
 });
+
+test("paced reveal keeps up with a fast model instead of trickling one word per tick", async () => {
+  const loaded = await loadModule();
+  try {
+    const queued = [];
+    const frames = [];
+    const reveal = loaded.module.createPacedTextReveal({
+      tickMs: 1,
+      schedule: callback => { queued.push(callback); return queued.length; },
+      emit: (text) => frames.push(text),
+    });
+    // ~1.4k characters of ordinary prose, the size of a real reply.
+    const answer = "The quick brown fox jumps over the lazy dog. ".repeat(32);
+    reveal.push(answer);
+    queued.shift()();
+    // A single tick must reveal far more than one word. The old first-boundary
+    // snap emitted ~4-9 characters per tick, so replies crawled behind the model.
+    assert.ok(frames[0].length >= 32, `first tick revealed only ${frames[0].length} chars`);
+    // Whole words only - never split mid-word.
+    assert.ok(answer.startsWith(frames[0]), "revealed text must be a prefix of the answer");
+    assert.match(frames[0], /[ \n]$/, "reveal should stop on a word boundary");
+    let ticks = 1;
+    while (queued.length > 0 && ticks < 200) { queued.shift()(); ticks += 1; }
+    const finished = reveal.finish();
+    while (queued.length > 0) queued.shift()();
+    assert.equal(await finished, answer);
+    // At 16ms per frame, this many ticks must stay well under a second of wall clock.
+    assert.ok(ticks <= 45, `took ${ticks} ticks to stream ${answer.length} chars`);
+  } finally {
+    await loaded.dispose();
+  }
+});

@@ -291,9 +291,11 @@ test("plugin permission identity keeps Gmail, Slack, and Linear separate", async
   }
 });
 
-test("connected plugins run without a blocking Allow click", async () => {
+test("connected plugins run once the user allows each one", async () => {
   const loaded = await loadModule();
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-plugin-permission-"));
+  // Stands in for the user clicking "Allow once" on each permission card.
+  let routerRef = null;
   const { writeFile } = await import("node:fs/promises");
   const tools = [
     pluginTool("gmail", "search_threads"),
@@ -321,7 +323,15 @@ test("connected plugins run without a blocking Allow click", async () => {
       dataDir,
       composeDelayMs: 0,
       permissionTimeoutMs: 500,
-      postEvent(_family, payload) { events.push(payload); },
+      postEvent(_family, payload) {
+        events.push(payload);
+        const approval = payload?.type === "appended" && payload.entry?.message?.type === "auto-review-approval"
+          ? payload.entry.message.approval
+          : null;
+        if (approval?.status === "pending") {
+          void routerRef?.dispatch("resolveAutoReviewApproval", { requestId: approval.requestId, resolution: "approved" });
+        }
+      },
       dispatchRemote: async (method, args) => {
         if (method === "listAgents") return [];
         if (method === "getAgentTranscriptTail") return { entries: [] };
@@ -337,15 +347,26 @@ test("connected plugins run without a blocking Allow click", async () => {
         return "used plugins";
       },
     });
+    routerRef = router;
     void router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "check mail, slack, and linear" });
     await waitFor(() => executed.length === 4, "expected every connected plugin tool to run");
     assert.deepEqual(executed.map(row => row.providerIdentifier), ["gmail", "gmail", "slack", "linear"]);
     const permissionAsks = events.filter(payload =>
       payload?.type === "appended" && payload.entry?.message?.type === "auto-review-approval"
     );
-    assert.equal(permissionAsks.length, 3, "Gmail should notice once, then Slack and Linear");
-    assert.equal(permissionAsks[0].entry.message.approval.status, "approved");
+    // "Allow once" allows exactly once, so Gmail's second tool asks again. The
+    // old count of 3 only held because the card added a session-wide allow
+    // before it was ever shown.
+    assert.equal(permissionAsks.length, 4, "allow-once must ask for every tool call");
+    // The card must go out pending: the renderer only enables Allow/Deny while
+    // it is, and a hardcoded "approved" made it a decorative badge.
+    assert.equal(permissionAsks[0].entry.message.approval.status, "pending");
     assert.match(permissionAsks[0].entry.message.approval.reason, /Using Gmail/);
+    const settled = events.filter(payload =>
+      payload?.type === "updated" && payload.entry?.message?.type === "auto-review-approval"
+    );
+    assert.equal(settled.length, 4, "each card must be settled, or its optimistic override lingers");
+    assert.deepEqual([...new Set(settled.map(row => row.entry.message.approval.status))], ["approved"]);
     const connectors = events.filter(payload => payload?.type === "appended" && payload.entry?.message?.type === "connector");
     assert.equal(connectors.length, 0, "already-connected plugins must not prompt to add another account");
   } finally {
@@ -617,7 +638,9 @@ test("answering a question card after the run finished starts a new user turn", 
   }
 });
 
-test("Claude plugin bridge runs Slack without a blocking Allow click", async () => {
+test("Claude plugin bridge runs Slack once the user allows it", async () => {
+  // Stands in for the user clicking "Allow once" on the permission card.
+  let bridgeRouterRef = null;
   const loaded = await loadModule();
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-claude-plugin-permission-"));
   const { writeFile } = await import("node:fs/promises");
@@ -642,7 +665,15 @@ test("Claude plugin bridge runs Slack without a blocking Allow click", async () 
       dataDir,
       composeDelayMs: 0,
       permissionTimeoutMs: 500,
-      postEvent(_family, payload) { events.push(payload); },
+      postEvent(_family, payload) {
+        events.push(payload);
+        const approval = payload?.type === "appended" && payload.entry?.message?.type === "auto-review-approval"
+          ? payload.entry.message.approval
+          : null;
+        if (approval?.status === "pending") {
+          void bridgeRouterRef?.dispatch("resolveAutoReviewApproval", { requestId: approval.requestId, resolution: "approved" });
+        }
+      },
       dispatchRemote: async (method, args) => {
         if (method === "listAgents") return [];
         if (method === "getAgentTranscriptTail") return { entries: [] };
@@ -668,6 +699,7 @@ test("Claude plugin bridge runs Slack without a blocking Allow click", async () 
         return "used slack";
       },
     });
+    bridgeRouterRef = router;
     await router.dispatch("sendPrompt", { agentId: loaded.module.LOCAL_INFERENCE_AGENT_ID, prompt: "post to slack" });
     await waitFor(() => executed.some(row => row.providerIdentifier === "slack"), "expected Slack to execute");
     assert.equal(executed.length, 1);
@@ -747,5 +779,96 @@ test("routed answers open a streaming typing bubble then settle the same message
   } finally {
     await loaded.dispose();
     await rmTree(dataDir);
+  }
+});
+
+/**
+ * The connector permission card used to be decorative: it was emitted with
+ * status "approved" already set, the plugin was added to the session allow-list
+ * before the card was shown, and the handler returned allow unconditionally.
+ * These cover the properties that make it a real gate.
+ */
+async function permissionHarness(settle) {
+  const loaded = await loadModule();
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "alli-permission-gate-"));
+  const { writeFile } = await import("node:fs/promises");
+  const tools = [pluginTool("gmail", "search_threads"), pluginTool("gmail", "create_label")];
+  const events = [];
+  const executed = [];
+  let routerRef = null;
+  await writeFile(path.join(dataDir, "settings.json"), JSON.stringify({
+    version: 1, mcpBoxServers: [], autoUpdateWhenIdleOptIn: false, egressTunnelEnabled: false,
+    webauthnProxyEnabled: true, mcpCustomInstructions: {}, mcpCustomInstructionsByServerId: {},
+    mcpDisabledToolsByServerId: {}, conciergeConsent: "unset", settingsMigrations: [], inferenceProvider: "grok",
+  }));
+  const router = loaded.module.createCoordinatorInferenceRouter({
+    dataDir,
+    composeDelayMs: 0,
+    permissionTimeoutMs: 300,
+    postEvent(_family, payload) {
+      events.push(payload);
+      const approval = payload?.type === "appended" && payload.entry?.message?.type === "auto-review-approval"
+        ? payload.entry.message.approval
+        : null;
+      if (approval?.status !== "pending") return;
+      const resolution = settle(events.filter(e => e?.entry?.message?.type === "auto-review-approval" && e.type === "appended").length);
+      if (resolution != null) void routerRef?.dispatch("resolveAutoReviewApproval", { requestId: approval.requestId, resolution });
+    },
+    dispatchRemote: async (method, args) => {
+      if (method === "listAgents") return [];
+      if (method === "getAgentTranscriptTail") return { entries: [] };
+      if (method === "listRoutedMcpTools") return tools;
+      if (method === "executeRoutedMcpTool") { executed.push(args); return { ok: true }; }
+      throw new Error(`unexpected ${method}`);
+    },
+    runProvider: async (_provider, _messages, options) => {
+      for (const tool of tools) await options.executeTool(tool, {}, `call-${tool.name}`);
+      return "done";
+    },
+  });
+  routerRef = router;
+  const asks = () => events.filter(e => e?.type === "appended" && e.entry?.message?.type === "auto-review-approval");
+  const settledStatuses = () => events
+    .filter(e => e?.type === "updated" && e.entry?.message?.type === "auto-review-approval")
+    .map(e => e.entry.message.approval.status);
+  return { loaded, dataDir, router, module: loaded.module, events, executed, asks, settledStatuses };
+}
+
+test("denying a connector card stops the tool from running", async () => {
+  const h = await permissionHarness(() => "denied");
+  try {
+    await h.router.dispatch("sendPrompt", { agentId: h.module.LOCAL_INFERENCE_AGENT_ID, prompt: "read my mail" });
+    await waitFor(() => h.settledStatuses().length > 0, "expected the denied card to settle");
+    assert.ok(h.asks().length > 0, "the user must actually be asked");
+    assert.deepEqual([...new Set(h.settledStatuses())], ["denied"]);
+    assert.equal(h.executed.length, 0, "a denied connector must not execute");
+  } finally {
+    await h.loaded.dispose();
+    await rmTree(h.dataDir);
+  }
+});
+
+test("always-allow stops the card reappearing for that connector", async () => {
+  const h = await permissionHarness(() => "always");
+  try {
+    await h.router.dispatch("sendPrompt", { agentId: h.module.LOCAL_INFERENCE_AGENT_ID, prompt: "read my mail" });
+    await waitFor(() => h.executed.length === 2, "both Gmail tools should run");
+    assert.equal(h.asks().length, 1, "always-allow must ask once for the connector, not per tool");
+    assert.deepEqual(h.settledStatuses(), ["always"]);
+  } finally {
+    await h.loaded.dispose();
+    await rmTree(h.dataDir);
+  }
+});
+
+test("an unanswered connector card expires closed instead of running the tool", async () => {
+  const h = await permissionHarness(() => null); // never settle - simulate the user ignoring it
+  try {
+    await h.router.dispatch("sendPrompt", { agentId: h.module.LOCAL_INFERENCE_AGENT_ID, prompt: "read my mail" });
+    await waitFor(() => h.settledStatuses().includes("expired"), "expected the ignored card to expire");
+    assert.equal(h.executed.length, 0, "an ignored card must fail closed, not open");
+  } finally {
+    await h.loaded.dispose();
+    await rmTree(h.dataDir);
   }
 });
