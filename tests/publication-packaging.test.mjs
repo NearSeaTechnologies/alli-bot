@@ -271,3 +271,29 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(coordinatorMain, /createCoordinatorInferenceRouter/);
   assert.match(coordinatorMain, /routed\.handled/);
 });
+
+test("removal patches fail loudly instead of silently no-opping", async () => {
+  const rendererPatch = await readFile(path.join(repoRoot, "scripts", "lib", "router-renderer-patch.mjs"), "utf8");
+  // replaceOnceOrSkip skips when `source.includes(after)`. With a bare "null" as
+  // the replacement that guard is trivially true for any bundle, so a drifted
+  // anchor silently left the removed item in place. Each removal now carries a
+  // distinctive sentinel so the guard means something.
+  assert.doesNotMatch(rendererPatch, /^const \w+_AFTER = "null";$/m);
+  assert.match(rendererPatch, /null\/\*sand-account-usage-removed\*\//);
+  assert.match(rendererPatch, /null\/\*sand-ios-item-removed\*\//);
+});
+
+test("the application menu can reach About and Send Feedback", async () => {
+  const menu = await readFile(path.join(repoRoot, "source", "electron-main", "application-menu.ts"), "utf8");
+  // Both backends were wired the whole time; nothing could emit the events.
+  assert.match(menu, /label: `About \$\{electron\.appName\}`, click: \(\) => options\.emitOpenAbout\(\)/);
+  assert.match(menu, /label: "Send Feedback", click: \(\) => options\.emitOpenFeedback\(\)/);
+});
+
+test("notification settings are stored rather than forced off", async () => {
+  const store = await readFile(path.join(repoRoot, "source", "shared", "node", "settings", "sand-settings-store.ts"), "utf8");
+  // The setter used to ignore its argument and the getter overwrote the file.
+  assert.doesNotMatch(store, /setNotificationConfig\(_input: unknown\)/);
+  assert.match(store, /setNotificationConfig\(input: unknown\)/);
+  assert.match(store, /normalizeNotificationConfig/);
+});

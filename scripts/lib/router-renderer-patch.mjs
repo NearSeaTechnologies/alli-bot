@@ -21,9 +21,9 @@ const FILE_STAGE_AFTER = "const c=new Uint8Array(await i.arrayBuffer());let bin=
 const FILE_STAGE_CALL_BEFORE = "b.stageAttachmentBytes({filename:we,bytes:Pe})";
 const FILE_STAGE_CALL_AFTER = "b.stageAttachmentBytes({filename:we,bytes:Pe,bytesBase64:typeof Pe===\"string\"?Pe:void 0})";
 const ACCOUNT_USAGE_BEFORE = "P&&b!=null?p.jsx(Qln,{onChangeLimit:F,reading:b}):null";
-const ACCOUNT_USAGE_AFTER = "null";
+const ACCOUNT_USAGE_AFTER = "null/*sand-account-usage-removed*/";
 const ACCOUNT_IOS_BEFORE = "N?p.jsx(It.Item,{leading:p.jsx(bt,{name:\"device-mobile\",size:\"base\"}),onSelect:L,children:\"Get Grok Bot for iOS\"}):null";
-const ACCOUNT_IOS_AFTER = "null";
+const ACCOUNT_IOS_AFTER = "null/*sand-ios-item-removed*/";
 const NEW_AGENT_OPEN_BEFORE = "ee.current||(s(),o(),N(),W.open())";
 const NEW_AGENT_OPEN_AFTER = "ee.current||(s(),o(),N(),W.openPicker())";
 const NDE_TAIL_BEFORE = 'id:"data-scientist",name:"Data Scientist",description:`Answers data questions with real ${Qi} queries and charts`,eligibility:{kind:"selected-tools",recommendedIf:["Tableau","Hex","Amplitude","Mixpanel","Snowflake","Databricks"]}}]';
