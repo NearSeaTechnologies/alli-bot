@@ -97,6 +97,9 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.doesNotMatch(rendererPatch, /Hey — introduce yourself/);
   // Agent liveness: the shipped renderer must keep the original's avatar animations,
   // typing dots and green working pip. These used to be patched out.
+  // The Updates section owns Reset computer / Update computer / Update baseline.
+  // Removing it left no way to reset or update the sandbox from the UI.
+  assert.match(rendererPatch, /\{id:"beta",label:"Updates",icon:"cloud-download"\}\]';/);
   assert.doesNotMatch(rendererPatch, /patchWorkingAvatarDots/);
   assert.doesNotMatch(rendererPatch, /keep bot image idle while working/);
   assert.doesNotMatch(rendererPatch, /do not overlay thinking dots on the bot image/);
